@@ -88,7 +88,7 @@ func main() {
 		var startTime time.Time
 		opt := dbtestify.SeedOpt{
 			BatchSize:    cli.Seed.BatchSize,
-			Operations:   map[string]dbtestify.Operation{},
+			Operations:   data.Operation,
 			IncludeTags:  cli.Seed.IncludeTag,
 			ExcludeTags:  cli.Seed.ExcludeTag,
 			TargetTables: cli.Seed.Targets,
@@ -194,10 +194,10 @@ func main() {
 		}
 
 		if !ok {
-			fmt.Printf(errC("Not Match\n"))
+			fmt.Println(errC("Not Match"))
 			os.Exit(1)
 		} else {
-			fmt.Printf(okC("Match\n"))
+			fmt.Println(okC("Match"))
 		}
 	case "http <dir>":
 		if cli.DB == "" {
