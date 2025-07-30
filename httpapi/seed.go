@@ -46,7 +46,7 @@ func seedTable(ctx context.Context, dbc dbtestify.DBConnector, useJson bool, w i
 	var result SeedResponse
 	opt := dbtestify.SeedOpt{
 		BatchSize:    reqOpt.BatchSize,
-		Operations:   map[string]dbtestify.Operation{},
+		Operations:   data.Operation,
 		IncludeTags:  reqOpt.IncludeTags,
 		ExcludeTags:  reqOpt.ExcludeTags,
 		TargetTables: reqOpt.Targets,
