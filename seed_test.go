@@ -7,13 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/alecthomas/assert/v2"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 func TestSeedSQLite(t *testing.T) {
@@ -298,9 +296,8 @@ func TestSeedPostgreSQL(t *testing.T) {
 		postgres.WithDatabase("seedtest"),
 		postgres.WithUsername("postgres"),
 		postgres.WithPassword("postgres"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).WithStartupTimeout(5*time.Second)))
+		postgres.BasicWaitStrategies(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,10 +480,6 @@ func TestSeedMySQL(t *testing.T) {
 		mysql.WithUsername("root"),
 		mysql.WithPassword("password"),
 		mysql.WithScripts(filepath.Join("testdata", "seed-test-init.sql")),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog(`socket: '/var/run/mysqld/mysqld.sock'`).
-				WithOccurrence(2).
-				WithStartupTimeout(5*time.Second)),
 	)
 	assert.NoError(t, err)
 	t.Cleanup(func() {

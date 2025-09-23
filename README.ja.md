@@ -212,6 +212,8 @@ login_history
 * `[null]`: 値がNULLであることを想定。`null` と同じです。
 * `[notnull]`: 値がNULLではないことを想定。
 * `[any]`: 任意の値にマッチ。
+* `[currentdate, <duration>]`: 実値が現在時刻から指定の許容差（Goのduration形式。省略時は `1m`）の範囲内であればマッチします。実値は `time.Time` もしくは RFC3339 / 一般的なSQLタイムスタンプ形式の文字列を想定します。
+* `[regexp, <pattern>]`: 実値を文字列化して、与えた正規表現パターンにマッチすれば一致とみなします。
 
 ```yaml
 _match:
@@ -223,6 +225,9 @@ user:
 
 login_history
 - { user_id: 10, time: [notnull]}
+
+audit_log:
+- { id: 1, created_at: [currentdate, 2m], message: [regexp, "^User .+ logged in$"] }
 ```
 
 ### タグ

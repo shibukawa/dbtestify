@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
+	"time"
 )
 
 // AssertResult represents the result of an assertion operation on a dataset.
@@ -107,15 +109,12 @@ func compareTable(tableName string, strategy MatchStrategy, pKeys []string, expe
 		PrimaryKeys: pKeys,
 	}
 	var i, j int
-	var c int
 	ok := true
-	for i < len(expected) && j < len(actual) && c < 10 {
-		c++
+	for i < len(expected) && j < len(actual) {
 		e := expected[i]
 		a := actual[j]
 		cr := comparePkey(len(pKeys), e, a)
-		switch cr {
-		case 0:
+		if cr == 0 { // keys equal
 			i++
 			j++
 			row := compareRow(len(pKeys), e, a)
@@ -123,30 +122,33 @@ func compareTable(tableName string, strategy MatchStrategy, pKeys []string, expe
 				ok = false
 			}
 			result.Rows = append(result.Rows, row)
-		case -1: // only on expected
+			continue
+		}
+		if cr < 0 { // only on expected
 			i++
 			row := make([]Diff, len(e))
-			for i, f := range e {
-				row[i] = Diff{Key: f.Key, Expect: f.Value}
+			for ii, f := range e {
+				row[ii] = Diff{Key: f.Key, Expect: f.Value}
 			}
 			result.Rows = append(result.Rows, RowDiff{
 				Fields: row,
 				Status: OnlyOnExpect,
 			})
 			ok = false
-		case 1: // only on actual
-			j++
-			if strategy == ExactMatchStrategy {
-				row := make([]Diff, len(a))
-				for i, f := range a {
-					row[i] = Diff{Key: f.Key, Actual: f.Value}
-				}
-				result.Rows = append(result.Rows, RowDiff{
-					Fields: row,
-					Status: OnlyOnActual,
-				})
-				ok = false
+			continue
+		}
+		// cr > 0 : only on actual
+		j++
+		if strategy == ExactMatchStrategy {
+			row := make([]Diff, len(a))
+			for ii, f := range a {
+				row[ii] = Diff{Key: f.Key, Actual: f.Value}
 			}
+			result.Rows = append(result.Rows, RowDiff{
+				Fields: row,
+				Status: OnlyOnActual,
+			})
+			ok = false
 		}
 	}
 	for i < len(expected) {
@@ -261,6 +263,72 @@ func compareRow(offset int, expected, actual []Value) RowDiff {
 					}
 				case "any":
 					result = append(result, Diff{Key: e.Key, Expect: e.Value, Actual: a.Value, Status: Match})
+				case "currentdate":
+					// [currentdate, duration] duration default: 1m
+					dur := time.Minute
+					if len(s) >= 2 && s[1] != nil {
+						if dstr, ok := s[1].(string); ok {
+							if parsed, err := time.ParseDuration(dstr); err == nil {
+								dur = parsed
+							}
+						} else {
+							if parsed, err := time.ParseDuration(fmt.Sprint(s[1])); err == nil {
+								dur = parsed
+							}
+						}
+					}
+					now := timeNow()
+					var at time.Time
+					ok := false
+					switch av := a.Value.(type) {
+					case time.Time:
+						at = av
+						ok = true
+					case string:
+						if t, parsed := parseTimeLoose(av); parsed {
+							at = t
+							ok = true
+						}
+					}
+					if ok {
+						if absDuration(now.Sub(at)) <= dur {
+							result = append(result, Diff{Key: e.Key, Expect: e.Value, Actual: a.Value, Status: Match})
+						} else {
+							result = append(result, Diff{Key: e.Key, Expect: e.Value, Actual: a.Value, Status: NotMatch})
+							allOk = false
+						}
+					} else {
+						// unsupported actual type or parse failure
+						result = append(result, Diff{Key: e.Key, Expect: e.Value, Actual: a.Value, Status: NotMatch})
+						allOk = false
+					}
+				case "regexp":
+					// [regexp, pattern]
+					if len(s) < 2 || s[1] == nil {
+						// No pattern provided -> treat as not match
+						result = append(result, Diff{Key: e.Key, Expect: e.Value, Actual: a.Value, Status: NotMatch})
+						allOk = false
+						break
+					}
+					pattern := fmt.Sprint(s[1])
+					re, err := regexp.Compile(pattern)
+					if err != nil {
+						result = append(result, Diff{Key: e.Key, Expect: e.Value, Actual: a.Value, Status: NotMatch})
+						allOk = false
+						break
+					}
+					var target string
+					if a.Value == nil {
+						target = ""
+					} else {
+						target = fmt.Sprint(a.Value)
+					}
+					if re.MatchString(target) {
+						result = append(result, Diff{Key: e.Key, Expect: e.Value, Actual: a.Value, Status: Match})
+					} else {
+						result = append(result, Diff{Key: e.Key, Expect: e.Value, Actual: a.Value, Status: NotMatch})
+						allOk = false
+					}
 				default:
 					panic("not implemented: [" + s[0].(string) + "]")
 				}
@@ -355,4 +423,38 @@ func fetchTableData(ctx context.Context, dbc DBConnector, tableName string) ([][
 	sortRow(result, pkeys)
 
 	return result, pkeys, nil
+}
+
+// timeNow is a var to allow tests to stub current time.
+var timeNow = time.Now
+
+// absDuration returns absolute value of a duration.
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
+}
+
+// parseTimeLoose tries several common layouts to parse time string.
+func parseTimeLoose(s string) (time.Time, bool) {
+	// Try RFC3339 and RFC3339Nano first
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, true
+	}
+	// Common SQL timestamp without timezone
+	if t, err := time.ParseInLocation("2006-01-02 15:04:05", s, time.Local); err == nil {
+		return t, true
+	}
+	if t, err := time.ParseInLocation("2006-01-02 15:04:05.999999999", s, time.Local); err == nil {
+		return t, true
+	}
+	// Date only
+	if t, err := time.ParseInLocation("2006-01-02", s, time.Local); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
 }

@@ -213,6 +213,8 @@ And there are special field values for matching:
 * `[null]`: It assumes the value is NULL. it is as same as `null`.
 * `[notnull]`: It assumes the value is not NULL.
 * `[any]`: It matches any value.
+* `[currentdate, <duration>]`: It matches when the actual value is within the specified duration from the current time. The duration is optional and defaults to `1m` (Go duration format, e.g., `30s`, `2m`, `1h`). The actual value can be `time.Time` or a string parseable by RFC3339 or common SQL timestamp formats.
+* `[regexp, <pattern>]`: It matches when the stringified actual value matches the given regular expression pattern.
 
 ```yaml
 _match:
@@ -224,6 +226,9 @@ user:
 
 login_history
 - { user_id: 10,. time: [notnull]}
+
+audit_log:
+- { id: 1, created_at: [currentdate, 2m], message: [regexp, "^User .+ logged in$"] }
 ```
 
 ### Tags

@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/alecthomas/assert/v2"
+	"github.com/docker/docker/client"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 func init() {
@@ -24,6 +24,9 @@ func TestDBConnectorPostgreSQL(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	if !dockerAvailable() {
+		t.Skip("Docker is not available; skipping container-based tests")
+	}
 
 	ctx := context.Background()
 
@@ -32,9 +35,7 @@ func TestDBConnectorPostgreSQL(t *testing.T) {
 		postgres.WithDatabase("dbconnectortest"),
 		postgres.WithUsername("postgres"),
 		postgres.WithPassword("postgres"),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).WithStartupTimeout(5*time.Second)),
+		postgres.BasicWaitStrategies(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -79,6 +80,9 @@ func TestDBConnectionMySQL(t *testing.T) {
 	if testing.Short() {
 		t.SkipNow()
 	}
+	if !dockerAvailable() {
+		t.Skip("Docker is not available; skipping container-based tests")
+	}
 
 	ctx := context.Background()
 
@@ -122,6 +126,18 @@ func TestDBConnectionMySQL(t *testing.T) {
 	pkeys, err = db.PrimaryKeys(ctx, "orders")
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"order_id", "product_id"}, pkeys)
+}
+
+// dockerAvailable returns true if local Docker daemon is reachable within ~1s.
+func dockerAvailable() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return false
+	}
+	_, err = cli.Ping(ctx)
+	return err == nil
 }
 
 func TestDBConnectionSQLite(t *testing.T) {
