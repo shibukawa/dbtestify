@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alecthomas/assert/v2"
 	"github.com/goccy/go-yaml"
@@ -895,6 +896,133 @@ func Test_compareTable(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := compareTable(tt.args.tableName, tt.args.strategy, tt.args.pkeys, tt.args.expected, tt.args.actual); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("compareTable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_compareRow_Directives_CurrentDate(t *testing.T) {
+	// Freeze time
+	oldTimeNow := timeNow
+	timeNow = func() time.Time { return time.Date(2025, 9, 23, 12, 0, 0, 0, time.UTC) }
+	defer func() { timeNow = oldTimeNow }()
+
+	base := timeNow()
+
+	type args struct {
+		offset   int
+		expected []Value
+		actual   []Value
+	}
+
+	tests := []struct {
+		name       string
+		args       args
+		wantStatus AssertStatus
+	}{
+		{
+			name: "currentdate default 1m: within 30s => match",
+			args: args{
+				offset:   0,
+				expected: []Value{{Key: "ts", Value: []any{"currentdate"}}},
+				actual:   []Value{{Key: "ts", Value: base.Add(30 * time.Second)}},
+			},
+			wantStatus: Match,
+		},
+		{
+			name: "currentdate default 1m: over 90s => not match",
+			args: args{
+				offset:   0,
+				expected: []Value{{Key: "ts", Value: []any{"currentdate"}}},
+				actual:   []Value{{Key: "ts", Value: base.Add(90 * time.Second)}},
+			},
+			wantStatus: NotMatch,
+		},
+		{
+			name: "currentdate 2m: within 90s => match",
+			args: args{
+				offset:   0,
+				expected: []Value{{Key: "ts", Value: []any{"currentdate", "2m"}}},
+				actual:   []Value{{Key: "ts", Value: base.Add(90 * time.Second)}},
+			},
+			wantStatus: Match,
+		},
+		{
+			name: "currentdate parse string RFC3339: match",
+			args: args{
+				offset:   0,
+				expected: []Value{{Key: "ts", Value: []any{"currentdate"}}},
+				actual:   []Value{{Key: "ts", Value: base.Add(20 * time.Second).Format(time.RFC3339)}},
+			},
+			wantStatus: Match,
+		},
+		{
+			name: "currentdate cannot parse string: not match",
+			args: args{
+				offset:   0,
+				expected: []Value{{Key: "ts", Value: []any{"currentdate"}}},
+				actual:   []Value{{Key: "ts", Value: "not-a-time"}},
+			},
+			wantStatus: NotMatch,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := compareRow(tt.args.offset, tt.args.expected, tt.args.actual)
+			if got.Status != tt.wantStatus {
+				t.Fatalf("got %v, want %v", got.Status, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func Test_compareRow_Directives_Regexp(t *testing.T) {
+	type args struct {
+		offset   int
+		expected []Value
+		actual   []Value
+	}
+
+	tests := []struct {
+		name       string
+		args       args
+		wantStatus AssertStatus
+	}{
+		{
+			name: "regexp match",
+			args: args{
+				offset:   0,
+				expected: []Value{{Key: "email", Value: []any{"regexp", "^.+@example\\.com$"}}},
+				actual:   []Value{{Key: "email", Value: "foo@example.com"}},
+			},
+			wantStatus: Match,
+		},
+		{
+			name: "regexp not match",
+			args: args{
+				offset:   0,
+				expected: []Value{{Key: "email", Value: []any{"regexp", "^.+@example\\.com$"}}},
+				actual:   []Value{{Key: "email", Value: "bar@other.com"}},
+			},
+			wantStatus: NotMatch,
+		},
+		{
+			name: "regexp invalid pattern => not match",
+			args: args{
+				offset:   0,
+				expected: []Value{{Key: "email", Value: []any{"regexp", "(*invalid"}}},
+				actual:   []Value{{Key: "email", Value: "foo@example.com"}},
+			},
+			wantStatus: NotMatch,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := compareRow(tt.args.offset, tt.args.expected, tt.args.actual)
+			if got.Status != tt.wantStatus {
+				t.Fatalf("got %v, want %v", got.Status, tt.wantStatus)
 			}
 		})
 	}
