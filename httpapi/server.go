@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shibukawa/dbtestify"
+	_ "github.com/shibukawa/dbtestify/drivers"
 )
 
 const MAX_MEMORY_BYTES = 1024 * 1024

@@ -12,6 +12,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/shibukawa/dbtestify"
+	_ "github.com/shibukawa/dbtestify/drivers"
 	"github.com/shibukawa/dbtestify/httpapi"
 )
 

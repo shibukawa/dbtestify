@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/alecthomas/assert/v2"
+	_ "github.com/shibukawa/dbtestify/drivers"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"

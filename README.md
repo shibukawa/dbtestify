@@ -146,6 +146,35 @@ func TestUsage(t *testing.T) {
     assertdb.AssertDB(t, dbtestifyConn, dataSet, "expect.yaml", nil)
 ```
 
+#### Using an existing `*sql.DB`
+
+The core `github.com/shibukawa/dbtestify` package registers no `database/sql`
+driver. Import `github.com/shibukawa/dbtestify/drivers` for its side effects
+when you want dbtestify to open the connection from a connection string:
+
+```go
+import (
+	"github.com/shibukawa/dbtestify"
+	_ "github.com/shibukawa/dbtestify/drivers"
+)
+
+dbc, err := dbtestify.NewDBConnector(ctx, "sqlite://file:database.db")
+```
+
+When your application or framework already owns the pool, hand it over instead.
+dbtestify never closes a pool it did not open, and this is the only way to reach
+an in-memory SQLite database:
+
+```go
+dbc, err := dbtestify.NewDBConnectorFromDB(db, dbtestify.SQLiteDialect)
+
+// or, from the unit test helpers
+assertdb.SeedDataSetDB(t, db, dbtestify.SQLiteDialect, dataSet, "initial.yaml", nil)
+assertdb.AssertDBWithDB(t, db, dbtestify.SQLiteDialect, dataSet, "expect.yaml", nil)
+```
+
+`dbtestify.ParseDialect` derives the dialect from a DSN scheme or driver name.
+
 ## Data Set Reference
 
 Data set definition is a key feature of dbtestify. Data set is defined in YAML format. Basic structure is like this:
