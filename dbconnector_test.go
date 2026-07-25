@@ -11,7 +11,6 @@ import (
 
 	"github.com/alecthomas/assert/v2"
 	"github.com/docker/docker/client"
-	_ "github.com/shibukawa/dbtestify/drivers"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -53,7 +52,7 @@ func TestDBConnectorPostgreSQL(t *testing.T) {
 	ctx2, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	db, err := NewDBConnector(ctx2, connStr)
+	db, err := openTestDBConnector(ctx2, connStr)
 	assert.NoError(t, err)
 
 	// with schema
@@ -105,7 +104,7 @@ func TestDBConnectionMySQL(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	db, err := NewDBConnector(ctx, "mysql://"+connStr)
+	db, err := openTestDBConnector(ctx, "mysql://"+connStr)
 	assert.NoError(t, err)
 
 	// with schema
@@ -164,7 +163,7 @@ func TestDBConnectionSQLite(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	db, err := NewDBConnector(ctx, "sqlite://"+connStr)
+	db, err := openTestDBConnector(ctx, "sqlite://"+connStr)
 	assert.NoError(t, err)
 
 	tnames, err := db.TableNames(ctx)

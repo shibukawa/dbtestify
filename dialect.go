@@ -42,17 +42,22 @@ func ParseDialect(name string) (Dialect, error) {
 	}
 }
 
-// driverName returns the database/sql driver registered by the drivers package
-// for this dialect.
-func (d Dialect) driverName() (string, error) {
-	switch d {
-	case PostgresDialect:
-		return "pgx", nil
-	case MySQLDialect:
-		return "mysql", nil
-	case SQLiteDialect:
-		return "sqlite3", nil
-	default:
-		return "", fmt.Errorf("%w: %q", ErrInvalidDialect, string(d))
+// SplitSource splits a "scheme://dsn" connection string into its Dialect and
+// the DSN to hand to sql.Open.
+//
+// PostgreSQL DSNs keep their scheme because pgx expects a full URL; the other
+// dialects drop it.
+func SplitSource(source string) (Dialect, string, error) {
+	scheme, dsn, ok := strings.Cut(source, "://")
+	if !ok {
+		return "", "", fmt.Errorf("%w: missing scheme in %q", ErrInvalidDialect, source)
 	}
+	dialect, err := ParseDialect(scheme)
+	if err != nil {
+		return "", "", err
+	}
+	if dialect == PostgresDialect {
+		return dialect, source, nil
+	}
+	return dialect, dsn, nil
 }

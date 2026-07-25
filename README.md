@@ -149,17 +149,18 @@ func TestUsage(t *testing.T) {
 #### Using an existing `*sql.DB`
 
 The core `github.com/shibukawa/dbtestify` package registers no `database/sql`
-driver. Import `github.com/shibukawa/dbtestify/drivers` for its side effects
-when you want dbtestify to open the connection from a connection string:
+driver. Opening a connection from a connection string now lives in
+`github.com/shibukawa/dbtestify/connect`:
 
 ```go
-import (
-	"github.com/shibukawa/dbtestify"
-	_ "github.com/shibukawa/dbtestify/drivers"
-)
+import "github.com/shibukawa/dbtestify/connect"
 
-dbc, err := dbtestify.NewDBConnector(ctx, "sqlite://file:database.db")
+dbc, err := connect.NewDBConnector(ctx, "sqlite://file:database.db")
 ```
+
+> **Breaking change:** `dbtestify.NewDBConnector` moved to
+> `connect.NewDBConnector`. Only the import path and the package qualifier
+> change; the signature and behavior are identical.
 
 When your application or framework already owns the pool, hand it over instead.
 dbtestify never closes a pool it did not open, and this is the only way to reach

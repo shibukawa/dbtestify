@@ -26,7 +26,7 @@ import (
 	"testing"
 
 	"github.com/shibukawa/dbtestify"
-	_ "github.com/shibukawa/dbtestify/drivers"
+	"github.com/shibukawa/dbtestify/connect"
 )
 
 // SeedDataSet seeds the database with the data from the specified YAML file.
@@ -34,7 +34,7 @@ func SeedDataSet(t *testing.T, dbConn string, folder fs.FS, fileName string, opt
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	dbc, err := dbtestify.NewDBConnector(ctx, dbConn)
+	dbc, err := connect.NewDBConnector(ctx, dbConn)
 	if err != nil {
 		t.Fatalf("Failed to create DB connector: %v", err)
 		return
@@ -61,7 +61,7 @@ func AssertDB(t *testing.T, dbConn string, folder fs.FS, fileName string, opt *d
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	dbc, err := dbtestify.NewDBConnector(ctx, dbConn)
+	dbc, err := connect.NewDBConnector(ctx, dbConn)
 	if err != nil {
 		t.Fatalf("Failed to create DB connector: %v", err)
 		return

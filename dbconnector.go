@@ -24,55 +24,6 @@ type DBConnector interface {
 	DB() *sql.DB
 }
 
-// NewDBConnector creates a new DBConnector based on the provided source string.
-// The source string should be in the format of "mysql://", "sqlite://", or "postgres://".
-//
-// The context is used to manage the lifecycle of the database connection. So you should pass a context that can be cancelled.
-// The returned DBConnector owns the *sql.DB it opened and closes it when ctx is done.
-// Use [NewDBConnectorFromDB] instead when the caller already owns the pool.
-//
-// This package uses https://github.com/jackc/pgx for PostgreSQL, https://github.com/go-sql-driver/mysql for MySQL, https://github.com/mattn/go-sqlite3 for SQLite3.
-// To study the detail of the connection string, check the documentation of each driver.
-//
-//   - postgres://user:pass@localhost:5432/dbname?sslmode=disable
-//   - mysql://root:pass@tcp(localhost:3306)/foo?tls=skip-verify
-//   - sqlite://file:dbfilename.db
-//
-// Those drivers are not registered by this package. Import
-// github.com/shibukawa/dbtestify/drivers for its side effects to register them.
-func NewDBConnector(ctx context.Context, source string) (DBConnector, error) {
-	scheme, dsn, ok := strings.Cut(source, "://")
-	if !ok {
-		return nil, fmt.Errorf("%w: invalid driver '%s'", ErrInvalidDBDriver, source)
-	}
-	dialect, err := ParseDialect(scheme)
-	if err != nil {
-		return nil, fmt.Errorf("%w: invalid driver '%s'", ErrInvalidDBDriver, source)
-	}
-	driver, err := dialect.driverName()
-	if err != nil {
-		return nil, fmt.Errorf("%w: invalid driver '%s'", ErrInvalidDBDriver, source)
-	}
-	// PostgreSQL DSNs keep their scheme; the others drop it.
-	if dialect == PostgresDialect {
-		dsn = source
-	}
-	db, err := sql.Open(driver, dsn)
-	if err != nil {
-		return nil, fmt.Errorf("%w: can't connect to %s '%s': %s (import github.com/shibukawa/dbtestify/drivers to register drivers)", ErrInvalidDBDriver, dialect, err.Error(), dsn)
-	}
-	go func() {
-		<-ctx.Done()
-		db.Close()
-	}()
-	connector, err := NewDBConnectorFromDB(db, dialect)
-	if err != nil {
-		db.Close()
-		return nil, err
-	}
-	return connector, nil
-}
-
 // NewDBConnectorFromDB creates a DBConnector on top of a *sql.DB the caller
 // already owns.
 //
@@ -82,7 +33,10 @@ func NewDBConnector(ctx context.Context, source string) (DBConnector, error) {
 // pool such as an in-memory SQLite database.
 //
 // dialect selects the SQL flavor because a *sql.DB does not expose the name it
-// was opened with. Use [ParseDialect] to derive it from a DSN scheme.
+// was opened with. Use [ParseDialect] or [SplitSource] to derive it from a DSN.
+//
+// This package registers no database/sql driver. To open a connection from a
+// connection string instead, use github.com/shibukawa/dbtestify/connect.
 func NewDBConnectorFromDB(db *sql.DB, dialect Dialect) (DBConnector, error) {
 	if db == nil {
 		return nil, fmt.Errorf("%w: nil *sql.DB", ErrInvalidDBDriver)

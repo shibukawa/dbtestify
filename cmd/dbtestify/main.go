@@ -12,7 +12,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/shibukawa/dbtestify"
-	_ "github.com/shibukawa/dbtestify/drivers"
+	"github.com/shibukawa/dbtestify/connect"
 	"github.com/shibukawa/dbtestify/httpapi"
 )
 
@@ -69,7 +69,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, errC("--db=<src> or DBTESTIFY_CONN envvar is required to specify database location."))
 			os.Exit(1)
 		}
-		dbc, err := dbtestify.NewDBConnector(ctx, cli.DB)
+		dbc, err := connect.NewDBConnector(ctx, cli.DB)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, errC("database location is invalid: %s\n"), errC(err.Error()))
 			os.Exit(1)
@@ -152,7 +152,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, errC("--db=<src> or dbtestify_CONN envvar is required to specify database location."))
 			os.Exit(1)
 		}
-		dbc, err := dbtestify.NewDBConnector(ctx, cli.DB)
+		dbc, err := connect.NewDBConnector(ctx, cli.DB)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, errC("database location is invalid: %s\n"), errC(err.Error()))
 			os.Exit(1)

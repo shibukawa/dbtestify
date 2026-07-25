@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/alecthomas/assert/v2"
-	_ "github.com/shibukawa/dbtestify/drivers"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // TestNewDBConnectorFromDBSharesPool proves that a caller-owned in-memory
@@ -73,10 +73,26 @@ func TestNewDBConnectorFromDBErrors(t *testing.T) {
 	assert.IsError(t, err, ErrInvalidDialect)
 }
 
-func TestNewDBConnectorRejectsUnknownScheme(t *testing.T) {
-	_, err := NewDBConnector(t.Context(), "oracle://localhost/orcl")
-	assert.IsError(t, err, ErrInvalidDBDriver)
+func TestSplitSource(t *testing.T) {
+	dialect, dsn, err := SplitSource("sqlite://file:x.db")
+	assert.NoError(t, err)
+	assert.Equal(t, SQLiteDialect, dialect)
+	assert.Equal(t, "file:x.db", dsn)
 
-	_, err = NewDBConnector(t.Context(), "file:no-scheme.db")
-	assert.IsError(t, err, ErrInvalidDBDriver)
+	dialect, dsn, err = SplitSource("mysql://root:pass@tcp(localhost:3306)/foo")
+	assert.NoError(t, err)
+	assert.Equal(t, MySQLDialect, dialect)
+	assert.Equal(t, "root:pass@tcp(localhost:3306)/foo", dsn)
+
+	// pgx wants the whole URL, so the scheme survives.
+	dialect, dsn, err = SplitSource("postgres://user@localhost:5432/db")
+	assert.NoError(t, err)
+	assert.Equal(t, PostgresDialect, dialect)
+	assert.Equal(t, "postgres://user@localhost:5432/db", dsn)
+
+	_, _, err = SplitSource("oracle://localhost/orcl")
+	assert.IsError(t, err, ErrInvalidDialect)
+
+	_, _, err = SplitSource("file:no-scheme.db")
+	assert.IsError(t, err, ErrInvalidDialect)
 }
