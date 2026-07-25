@@ -17,11 +17,18 @@ var ErrInvalidDBDriver = errors.New("invalid db driver")
 type DBConnector interface {
 	TableNames(ctx context.Context, schema ...string) ([]string, error)
 	PrimaryKeys(ctx context.Context, table string) ([]string, error)
-	Insert(ctx context.Context, tx *sql.Tx, tableName string, columns []string, values []any) error
-	Delete(ctx context.Context, tx *sql.Tx, tableName string, columns []string, values []any) error
-	Upsert(ctx context.Context, tx *sql.Tx, tableName string, columns, pKeys []string, values []any) error
-	Truncate(ctx context.Context, tx *sql.Tx, tableName string) error
+	Insert(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error
+	Delete(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error
+	Upsert(ctx context.Context, exec Executor, tableName string, columns, pKeys []string, values []any) error
+	Truncate(ctx context.Context, exec Executor, tableName string) error
+
+	// Executor returns the target statements run on.
+	Executor() Executor
+	// DB returns the pool when the connector owns one, and nil when it wraps a
+	// transaction.
 	DB() *sql.DB
+	// InTransaction reports whether Executor is already inside a transaction.
+	InTransaction() bool
 }
 
 // NewDBConnectorFromDB creates a DBConnector on top of a *sql.DB the caller
@@ -41,33 +48,70 @@ func NewDBConnectorFromDB(db *sql.DB, dialect Dialect) (DBConnector, error) {
 	if db == nil {
 		return nil, fmt.Errorf("%w: nil *sql.DB", ErrInvalidDBDriver)
 	}
+	return newConnector(baseConnector{exec: db, db: db}, dialect)
+}
+
+// NewDBConnectorFromTx creates a DBConnector that runs inside a transaction the
+// caller already opened.
+//
+// [Seed] then opens no transaction of its own and commits nothing, so the
+// caller decides whether the seeded rows are committed or rolled back. [Assert]
+// sees the transaction's uncommitted state, which a pool-based connector cannot
+// observe.
+//
+// dbtestify never commits or rolls back tx.
+func NewDBConnectorFromTx(tx *sql.Tx, dialect Dialect) (DBConnector, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("%w: nil *sql.Tx", ErrInvalidDBDriver)
+	}
+	return newConnector(baseConnector{exec: tx, inTx: true}, dialect)
+}
+
+// NewDBConnectorFromExecutor creates a DBConnector on top of any Executor, such
+// as a *sql.Conn pinned to one session.
+//
+// Set inTransaction when the executor is already inside a transaction so [Seed]
+// does not try to open another one. A *sql.Conn is not in a transaction unless
+// the caller started one on it.
+func NewDBConnectorFromExecutor(exec Executor, dialect Dialect, inTransaction bool) (DBConnector, error) {
+	if exec == nil {
+		return nil, fmt.Errorf("%w: nil Executor", ErrInvalidDBDriver)
+	}
+	base := baseConnector{exec: exec, inTx: inTransaction}
+	if db, ok := exec.(*sql.DB); ok {
+		base.db = db
+	}
+	return newConnector(base, dialect)
+}
+
+func newConnector(base baseConnector, dialect Dialect) (DBConnector, error) {
 	switch dialect {
 	case PostgresDialect:
-		return &psqlDBConnector{db: db}, nil
+		return &psqlDBConnector{baseConnector: base}, nil
 	case MySQLDialect:
-		return &mysqlDBConnector{db: db}, nil
+		return &mysqlDBConnector{baseConnector: base}, nil
 	case SQLiteDialect:
-		return &sqliteDBConnector{db: db}, nil
+		return &sqliteDBConnector{baseConnector: base}, nil
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrInvalidDialect, string(dialect))
 	}
 }
 
 type psqlDBConnector struct {
-	db *sql.DB
+	baseConnector
 }
 
 func (p *psqlDBConnector) TableNames(ctx context.Context, schema ...string) ([]string, error) {
 	var s string
 	if len(schema) == 0 {
-		err := p.db.QueryRowContext(ctx, `SELECT current_schema();`).Scan(&s)
+		err := p.exec.QueryRowContext(ctx, `SELECT current_schema();`).Scan(&s)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		s = schema[0]
 	}
-	rows, err := p.db.QueryContext(ctx, `
+	rows, err := p.exec.QueryContext(ctx, `
 		SELECT
 			tablename
 		FROM
@@ -98,13 +142,13 @@ func (p *psqlDBConnector) PrimaryKeys(ctx context.Context, table string) ([]stri
 		schema = f[0]
 		tname = f[1]
 	} else {
-		err := p.db.QueryRowContext(ctx, `SELECT current_schema();`).Scan(&schema)
+		err := p.exec.QueryRowContext(ctx, `SELECT current_schema();`).Scan(&schema)
 		if err != nil {
 			return nil, err
 		}
 		tname = table
 	}
-	rows, err := p.db.QueryContext(ctx, `
+	rows, err := p.exec.QueryContext(ctx, `
 		SELECT
 			kcu.column_name
 		FROM
@@ -139,10 +183,6 @@ func (p *psqlDBConnector) PrimaryKeys(ctx context.Context, table string) ([]stri
 	return result, nil
 }
 
-func (p *psqlDBConnector) DB() *sql.DB {
-	return p.db
-}
-
 func pgPlaceholders(columns, rows int) string {
 	c := 1
 	var placeholders []string
@@ -157,18 +197,18 @@ func pgPlaceholders(columns, rows int) string {
 	return strings.Join(placeholders, ", ")
 }
 
-func (p *psqlDBConnector) Insert(ctx context.Context, tx *sql.Tx, tableName string, columns []string, values []any) error {
+func (p *psqlDBConnector) Insert(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error {
 	insertStmt := fmt.Sprintf(
 		"INSERT INTO %s (%s) VALUES %s",
 		tableName,
 		strings.Join(columns, ", "),
 		pgPlaceholders(len(columns), len(values)/len(columns)),
 	)
-	_, err := tx.ExecContext(ctx, insertStmt, values...)
+	_, err := exec.ExecContext(ctx, insertStmt, values...)
 	return err
 }
 
-func (p *psqlDBConnector) Delete(ctx context.Context, tx *sql.Tx, tableName string, columns []string, values []any) error {
+func (p *psqlDBConnector) Delete(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error {
 	var columnStr string
 	var placeholderStr string
 	if len(columns) > 1 {
@@ -188,18 +228,18 @@ func (p *psqlDBConnector) Delete(ctx context.Context, tx *sql.Tx, tableName stri
 		columnStr,
 		placeholderStr,
 	)
-	_, err := tx.ExecContext(ctx, deleteStmt, values...)
+	_, err := exec.ExecContext(ctx, deleteStmt, values...)
 	return err
 }
 
 // Truncate implements DBConnector.
-func (p *psqlDBConnector) Truncate(ctx context.Context, tx *sql.Tx, tableName string) error {
-	_, err := tx.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s;", tableName))
+func (p *psqlDBConnector) Truncate(ctx context.Context, exec Executor, tableName string) error {
+	_, err := exec.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s;", tableName))
 	return err
 }
 
 // Upsert implements DBConnector.
-func (p *psqlDBConnector) Upsert(ctx context.Context, tx *sql.Tx, tableName string, columns, pKeys []string, values []any) error {
+func (p *psqlDBConnector) Upsert(ctx context.Context, exec Executor, tableName string, columns, pKeys []string, values []any) error {
 	var assigns []string
 	for _, column := range columns {
 		if !slices.Contains(pKeys, column) {
@@ -215,27 +255,27 @@ func (p *psqlDBConnector) Upsert(ctx context.Context, tx *sql.Tx, tableName stri
 		strings.Join(pKeys, ", "),
 		strings.Join(assigns, ", "),
 	)
-	_, err := tx.ExecContext(ctx, insertStmt, values...)
+	_, err := exec.ExecContext(ctx, insertStmt, values...)
 	return err
 }
 
 var _ DBConnector = (*psqlDBConnector)(nil)
 
 type mysqlDBConnector struct {
-	db *sql.DB
+	baseConnector
 }
 
 func (m *mysqlDBConnector) TableNames(ctx context.Context, schema ...string) ([]string, error) {
 	var s string
 	if len(schema) == 0 {
-		err := m.db.QueryRowContext(ctx, `SELECT DATABASE();`).Scan(&s)
+		err := m.exec.QueryRowContext(ctx, `SELECT DATABASE();`).Scan(&s)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		s = schema[0]
 	}
-	rows, err := m.db.QueryContext(ctx, `
+	rows, err := m.exec.QueryContext(ctx, `
 		SELECT
 			t.table_name
 		FROM
@@ -269,13 +309,13 @@ func (m *mysqlDBConnector) PrimaryKeys(ctx context.Context, table string) ([]str
 		schema = f[0]
 		tname = f[1]
 	} else {
-		err := m.db.QueryRowContext(ctx, `SELECT DATABASE();`).Scan(&schema)
+		err := m.exec.QueryRowContext(ctx, `SELECT DATABASE();`).Scan(&schema)
 		if err != nil {
 			return nil, err
 		}
 		tname = table
 	}
-	rows, err := m.db.QueryContext(ctx, `
+	rows, err := m.exec.QueryContext(ctx, `
 		SELECT
 			c.COLUMN_NAME
 		FROM
@@ -304,22 +344,18 @@ func (m *mysqlDBConnector) PrimaryKeys(ctx context.Context, table string) ([]str
 	return result, nil
 }
 
-func (p *mysqlDBConnector) DB() *sql.DB {
-	return p.db
-}
-
-func (m *mysqlDBConnector) Insert(ctx context.Context, tx *sql.Tx, tableName string, columns []string, values []any) error {
+func (m *mysqlDBConnector) Insert(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error {
 	insertStmt := fmt.Sprintf(
 		"INSERT INTO %s (%s) VALUES %s;",
 		tableName,
 		strings.Join(columns, ", "),
 		slPlaceholders(len(columns), len(values)/len(columns)),
 	)
-	_, err := tx.ExecContext(ctx, insertStmt, values...)
+	_, err := exec.ExecContext(ctx, insertStmt, values...)
 	return err
 }
 
-func (m *mysqlDBConnector) Delete(ctx context.Context, tx *sql.Tx, tableName string, columns []string, values []any) error {
+func (m *mysqlDBConnector) Delete(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error {
 	var columnStr string
 	var placeholderStr string
 	if len(columns) > 1 {
@@ -336,11 +372,11 @@ func (m *mysqlDBConnector) Delete(ctx context.Context, tx *sql.Tx, tableName str
 		placeholderStr,
 	)
 
-	_, err := tx.ExecContext(ctx, deleteStmt, values...)
+	_, err := exec.ExecContext(ctx, deleteStmt, values...)
 	return err
 }
 
-func (m *mysqlDBConnector) Upsert(ctx context.Context, tx *sql.Tx, tableName string, columns, pKeys []string, values []any) error {
+func (m *mysqlDBConnector) Upsert(ctx context.Context, exec Executor, tableName string, columns, pKeys []string, values []any) error {
 	var assigns []string
 	for _, column := range columns {
 		if !slices.Contains(pKeys, column) {
@@ -355,23 +391,23 @@ func (m *mysqlDBConnector) Upsert(ctx context.Context, tx *sql.Tx, tableName str
 		slPlaceholders(len(columns), len(values)/len(columns)),
 		strings.Join(assigns, ", "),
 	)
-	_, err := tx.ExecContext(ctx, insertStmt, values...)
+	_, err := exec.ExecContext(ctx, insertStmt, values...)
 	return err
 }
 
-func (m *mysqlDBConnector) Truncate(ctx context.Context, tx *sql.Tx, tableName string) error {
-	_, err := tx.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s;", tableName))
+func (m *mysqlDBConnector) Truncate(ctx context.Context, exec Executor, tableName string) error {
+	_, err := exec.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s;", tableName))
 	return err
 }
 
 var _ DBConnector = (*mysqlDBConnector)(nil)
 
 type sqliteDBConnector struct {
-	db *sql.DB
+	baseConnector
 }
 
 func (s *sqliteDBConnector) TableNames(ctx context.Context, schema ...string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.exec.QueryContext(ctx, `
 		SELECT
 			sm.name
 		FROM
@@ -396,7 +432,7 @@ func (s *sqliteDBConnector) TableNames(ctx context.Context, schema ...string) ([
 }
 
 func (s *sqliteDBConnector) PrimaryKeys(ctx context.Context, table string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.exec.QueryContext(ctx, `
 		SELECT
 			ti.name
 		FROM
@@ -420,28 +456,24 @@ func (s *sqliteDBConnector) PrimaryKeys(ctx context.Context, table string) ([]st
 	return result, nil
 }
 
-func (p *sqliteDBConnector) DB() *sql.DB {
-	return p.db
-}
-
 func slPlaceholders(columns, records int) string {
 	rp := "(" + strings.Join(slices.Repeat([]string{"?"}, columns), ", ") + ")"
 	placeholders := slices.Repeat([]string{rp}, records)
 	return strings.Join(placeholders, ", ")
 }
 
-func (s *sqliteDBConnector) Insert(ctx context.Context, tx *sql.Tx, tableName string, columns []string, values []any) error {
+func (s *sqliteDBConnector) Insert(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error {
 	insertStmt := fmt.Sprintf(
 		"INSERT INTO %s (%s) VALUES %s",
 		tableName,
 		strings.Join(columns, ", "),
 		slPlaceholders(len(columns), len(values)/len(columns)),
 	)
-	_, err := tx.ExecContext(ctx, insertStmt, values...)
+	_, err := exec.ExecContext(ctx, insertStmt, values...)
 	return err
 }
 
-func (s *sqliteDBConnector) Delete(ctx context.Context, tx *sql.Tx, tableName string, columns []string, values []any) error {
+func (s *sqliteDBConnector) Delete(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error {
 	var columnStr string
 	var placeholderStr string
 	if len(columns) > 1 {
@@ -457,11 +489,11 @@ func (s *sqliteDBConnector) Delete(ctx context.Context, tx *sql.Tx, tableName st
 		columnStr,
 		placeholderStr,
 	)
-	_, err := tx.ExecContext(ctx, deleteStmt, values...)
+	_, err := exec.ExecContext(ctx, deleteStmt, values...)
 	return err
 }
 
-func (s *sqliteDBConnector) Upsert(ctx context.Context, tx *sql.Tx, tableName string, columns, pKeys []string, values []any) error {
+func (s *sqliteDBConnector) Upsert(ctx context.Context, exec Executor, tableName string, columns, pKeys []string, values []any) error {
 	var assigns []string
 	for _, column := range columns {
 		if !slices.Contains(pKeys, column) {
@@ -477,13 +509,13 @@ func (s *sqliteDBConnector) Upsert(ctx context.Context, tx *sql.Tx, tableName st
 		strings.Join(pKeys, ", "),
 		strings.Join(assigns, ", "),
 	)
-	_, err := tx.ExecContext(ctx, insertStmt, values...)
+	_, err := exec.ExecContext(ctx, insertStmt, values...)
 	return err
 }
 
-func (s *sqliteDBConnector) Truncate(ctx context.Context, tx *sql.Tx, tableName string) error {
+func (s *sqliteDBConnector) Truncate(ctx context.Context, exec Executor, tableName string) error {
 	truncateSrc := fmt.Sprintf("DELETE FROM %s;", tableName)
-	_, err := tx.ExecContext(ctx, truncateSrc)
+	_, err := exec.ExecContext(ctx, truncateSrc)
 	return err
 }
 

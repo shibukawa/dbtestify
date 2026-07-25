@@ -176,6 +176,40 @@ assertdb.AssertDBWithDB(t, db, dbtestify.SQLiteDialect, dataSet, "expect.yaml", 
 
 `dbtestify.ParseDialect` derives the dialect from a DSN scheme or driver name.
 
+#### Working inside an existing transaction
+
+Tests that wrap every case in one transaction and roll it back at the end need
+dbtestify to run on that transaction, not on the pool: the pool cannot see
+uncommitted writes, and it may not even have a free connection.
+
+```go
+tx, err := db.BeginTx(ctx, nil)
+defer tx.Rollback()
+
+dbc, err := dbtestify.NewDBConnectorFromTx(tx, dbtestify.SQLiteDialect)
+
+// Seed opens no transaction and commits nothing; the rollback undoes it.
+err = dbtestify.Seed(ctx, dbc, data, dbtestify.SeedOpt{})
+
+// Assert sees what the transaction wrote, committed or not.
+ok, _, err := dbtestify.Assert(ctx, dbc, expected, dbtestify.AssertOpt{})
+
+// or, from the unit test helpers
+assertdb.SeedDataSetTx(t, tx, dbtestify.SQLiteDialect, dataSet, "initial.yaml", nil)
+assertdb.AssertDBTx(t, tx, dbtestify.SQLiteDialect, dataSet, "expect.yaml", nil)
+```
+
+`dbtestify.NewDBConnectorFromExecutor` accepts anything with `ExecContext`,
+`QueryContext`, and `QueryRowContext` — a `*sql.Conn`, for example — with a flag
+saying whether it is already inside a transaction.
+
+> **Breaking change:** `DBConnector`'s `Insert`, `Delete`, `Upsert`, and
+> `Truncate` take a `dbtestify.Executor` instead of a `*sql.Tx`, and the
+> interface gained `Executor()` and `InTransaction()`. Callers passing a
+> `*sql.Tx` are unaffected because `*sql.Tx` satisfies `Executor`; only custom
+> `DBConnector` implementations need updating. `DB()` now returns nil for a
+> connector built from a transaction.
+
 ## Data Set Reference
 
 Data set definition is a key feature of dbtestify. Data set is defined in YAML format. Basic structure is like this:
