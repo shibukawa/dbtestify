@@ -6,10 +6,27 @@ on:
       - 'v*.*.*'
 
 jobs:
-  build_and_release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # cgo must be enabled so that github.com/mattn/go-sqlite3 works at
+          # runtime, so each target is built on its own native runner instead
+          # of cross-compiling from ubuntu.
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+            asset: dbtestify-linux-amd64
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+            asset: dbtestify-windows-amd64.exe
+          - runner: macos-latest
+            goos: darwin
+            goarch: arm64
+            asset: dbtestify-darwin-arm64
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout code
@@ -18,57 +35,41 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '1'
+        run: go build -trimpath -ldflags="-s -w" -o ${{ matrix.asset }} ./cmd/dbtestify
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
+          name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
-
-      - name: Build for Linux (amd64)
-        run: |
-          GOOS=linux GOARCH=amd64 go install -ldflags="-s -w" github.com/shibukawa/dbtestify/cmd/dbtestify@latest
-          mv /home/runner/go/bin/dbtestify dbtestify-linux-amd64
-      - name: Upload Linux (amd64) binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dbtestify-linux-amd64
-          asset_name: dbtestify-linux-amd64
-          asset_content_type: application/octet-stream 
-
-      - name: Build for Windows (amd64)
-        run: |
-          GOOS=windows GOARCH=amd64 go install -trimpath -ldflags="-s -w" github.com/shibukawa/dbtestify/cmd/dbtestify@latest
-          mv /home/runner/go/bin/windows_amd64/dbtestify.exe dbtestify-windows-amd64.exe
-      - name: Upload Windows (amd64) binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dbtestify-windows-amd64.exe
-          asset_name: dbtestify-windows-amd64.exe
-          asset_content_type: application/octet-stream 
-
-      - name: Build for macOS (arm64)
-        run: |
-          GOOS=darwin GOARCH=arm64 go install -trimpath -ldflags="-s -w" github.com/shibukawa/dbtestify/cmd/dbtestify@latest
-          mv /home/runner/go/bin/darwin_arm64/dbtestify dbtestify-darwin-arm64
-      - name: Upload macOS (arm64) binary
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./dbtestify-darwin-arm64
-          asset_name: dbtestify-darwin-arm64
-          asset_content_type: application/octet-stream 
+          generate_release_notes: true
+          files: dist/*
