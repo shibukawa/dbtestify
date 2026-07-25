@@ -13,7 +13,6 @@ import (
 
 	"github.com/alecthomas/assert/v2"
 	"github.com/goccy/go-yaml"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 type Opt struct {
@@ -41,7 +40,7 @@ func TestAssertSQLite(t *testing.T) {
 			ctx2, cancel := context.WithCancel(t.Context())
 			defer cancel()
 
-			dbc, err := NewDBConnector(ctx2, "sqlite3://"+connStr)
+			dbc, err := openTestDBConnector(ctx2, "sqlite3://"+connStr)
 			assert.NoError(t, err)
 
 			_, err = dbc.DB().ExecContext(t.Context(), TrimIndent(t, `
@@ -132,7 +131,7 @@ func Test_fetchTableData(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	dbc, err := NewDBConnector(ctx, "sqlite3://"+connStr)
+	dbc, err := openTestDBConnector(ctx, "sqlite3://"+connStr)
 	assert.NoError(t, err)
 
 	actual, _, err := fetchTableData(ctx, dbc, "user")

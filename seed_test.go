@@ -125,7 +125,7 @@ func TestSeedSQLite(t *testing.T) {
 			ctx2, cancel := context.WithCancel(t.Context())
 			defer cancel()
 
-			dbc, err := NewDBConnector(ctx2, "sqlite3://"+connStr)
+			dbc, err := openTestDBConnector(ctx2, "sqlite3://"+connStr)
 			assert.NoError(t, err)
 
 			_, err = dbc.DB().ExecContext(t.Context(), TrimIndent(t, `
@@ -315,7 +315,7 @@ func TestSeedPostgreSQL(t *testing.T) {
 			ctx2, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			dbc, err := NewDBConnector(ctx2, connStr)
+			dbc, err := openTestDBConnector(ctx2, connStr)
 			assert.NoError(t, err)
 
 			dbc.DB().ExecContext(ctx2, TrimIndent(t, `
@@ -495,7 +495,7 @@ func TestSeedMySQL(t *testing.T) {
 			ctx2, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			dbc, err := NewDBConnector(ctx2, "mysql://"+connStr)
+			dbc, err := openTestDBConnector(ctx2, "mysql://"+connStr)
 			assert.NoError(t, err)
 
 			dbc.DB().ExecContext(ctx2, TrimIndent(t, `

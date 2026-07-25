@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shibukawa/dbtestify"
+	"github.com/shibukawa/dbtestify/connect"
 )
 
 const MAX_MEMORY_BYTES = 1024 * 1024
@@ -62,7 +62,7 @@ func Start(ctx context.Context, dir, dbconn string, port uint16) error {
 		} else {
 			w.Header().Set("Content-Type", "text/plain")
 		}
-		dbc, err := dbtestify.NewDBConnector(ctx, dbconn)
+		dbc, err := connect.NewDBConnector(ctx, dbconn)
 		if err != nil {
 			w.Header().Set("Content-Type", "text/plain")
 			http.Error(w, fmt.Sprintf(`database connection error: %v`, err), http.StatusInternalServerError)
@@ -86,7 +86,7 @@ func Start(ctx context.Context, dir, dbconn string, port uint16) error {
 		} else {
 			w.Header().Set("Content-Type", "text/plain")
 		}
-		dbc, err := dbtestify.NewDBConnector(ctx, dbconn)
+		dbc, err := connect.NewDBConnector(ctx, dbconn)
 		if err != nil {
 			w.Header().Set("Content-Type", "text/plain")
 			http.Error(w, fmt.Sprintf(`database connection error: %v`, err), http.StatusInternalServerError)
@@ -184,7 +184,7 @@ func parseAssertRequest(r *http.Request) AssertOpt {
 func testDBConnection(ctx context.Context, dbconn string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	dbc, err := dbtestify.NewDBConnector(ctx, dbconn)
+	dbc, err := connect.NewDBConnector(ctx, dbconn)
 	if err != nil {
 		return err
 	}

@@ -8,10 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-
-	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 var ErrInvalidDBDriver = errors.New("invalid db driver")
@@ -28,52 +24,32 @@ type DBConnector interface {
 	DB() *sql.DB
 }
 
-// NewDBConnector creates a new DBConnector based on the provided source string.
-// The source string should be in the format of "mysql://", "sqlite://", or "postgres://".
+// NewDBConnectorFromDB creates a DBConnector on top of a *sql.DB the caller
+// already owns.
 //
-// The context is used to manage the lifecycle of the database connection. So you should pass a context that can be cancelled.
+// dbtestify never closes db and never changes its pool settings, so the caller
+// stays responsible for its lifecycle. Use this when the pool is owned by an
+// application framework, or when the database is unreachable from a second
+// pool such as an in-memory SQLite database.
 //
-// This package uses https://github.com/jackc/pgx for PostgreSQL, https://github.com/go-sql-driver/mysql for MySQL, https://github.com/mattn/go-sqlite3 for SQLite3.
-// To study the detail of the connection string, check the documentation of each driver.
+// dialect selects the SQL flavor because a *sql.DB does not expose the name it
+// was opened with. Use [ParseDialect] or [SplitSource] to derive it from a DSN.
 //
-//   - postgres://user:pass@localhost:5432/dbname?sslmode=disable
-//   - mysql://root:pass@tcp(localhost:3306)/foo?tls=skip-verify
-//   - sqlite://file:dbfilename.db
-func NewDBConnector(ctx context.Context, source string) (DBConnector, error) {
-	if strings.HasPrefix(source, "mysql://") {
-		source = strings.TrimPrefix(source, "mysql://")
-		db, err := sql.Open("mysql", source)
-		if err != nil {
-			return nil, fmt.Errorf("%w: can't connect to MySQL '%s': %s", ErrInvalidDBDriver, err.Error(), source)
-		}
-		go func() {
-			<-ctx.Done()
-			db.Close()
-		}()
-		return &mysqlDBConnector{db: db}, nil
-	} else if strings.HasPrefix(source, "sqlite://") || strings.HasPrefix(source, "sqlite3://") {
-		source = strings.TrimPrefix(strings.TrimPrefix(source, "sqlite://"), "sqlite3://")
-		db, err := sql.Open("sqlite3", source)
-		if err != nil {
-			return nil, fmt.Errorf("%w: can't open SQLite3 database file '%s': %s", ErrInvalidDBDriver, err.Error(), source)
-		}
-		go func() {
-			<-ctx.Done()
-			db.Close()
-		}()
-		return &sqliteDBConnector{db: db}, nil
-	} else if strings.HasPrefix(source, "postgres://") {
-		db, err := sql.Open("pgx", source)
-		if err != nil {
-			return nil, fmt.Errorf("%w: can't connect to PostgreSQL '%s': %s", ErrInvalidDBDriver, err.Error(), source)
-		}
-		go func() {
-			<-ctx.Done()
-			db.Close()
-		}()
+// This package registers no database/sql driver. To open a connection from a
+// connection string instead, use github.com/shibukawa/dbtestify/connect.
+func NewDBConnectorFromDB(db *sql.DB, dialect Dialect) (DBConnector, error) {
+	if db == nil {
+		return nil, fmt.Errorf("%w: nil *sql.DB", ErrInvalidDBDriver)
+	}
+	switch dialect {
+	case PostgresDialect:
 		return &psqlDBConnector{db: db}, nil
-	} else {
-		return nil, fmt.Errorf("%w: invalid driver '%s'", ErrInvalidDBDriver, source)
+	case MySQLDialect:
+		return &mysqlDBConnector{db: db}, nil
+	case SQLiteDialect:
+		return &sqliteDBConnector{db: db}, nil
+	default:
+		return nil, fmt.Errorf("%w: %q", ErrInvalidDialect, string(dialect))
 	}
 }
 
