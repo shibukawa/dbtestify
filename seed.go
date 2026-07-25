@@ -2,7 +2,7 @@ package dbtestify
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"maps"
 	"slices"
 )
@@ -21,15 +21,33 @@ type SeedOpt struct {
 }
 
 // Seed initializes the database with the provided dataset, applying the specified operations.
+//
+// A connector built from a pool runs the whole dataset in one transaction that
+// Seed opens and commits. A connector built with [NewDBConnectorFromTx] runs in
+// the caller's transaction instead, and Seed neither commits nor rolls back.
 func Seed(ctx context.Context, dbc DBConnector, data *DataSet, opt SeedOpt) error {
 	if opt.BatchSize == 0 {
 		opt.BatchSize = DefaultBatchSize
 	}
-	tx, err := dbc.DB().BeginTx(ctx, nil)
+	if dbc.InTransaction() {
+		return seedInto(ctx, dbc, dbc.Executor(), data, opt)
+	}
+	db := dbc.DB()
+	if db == nil {
+		return errors.New("dbtestify: connector has no pool to open a transaction on")
+	}
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := seedInto(ctx, dbc, tx, data, opt); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func seedInto(ctx context.Context, dbc DBConnector, exec Executor, data *DataSet, opt SeedOpt) error {
 	// truncate first
 	ops := map[string]Operation{}
 	for t, op := range opt.Operations {
@@ -55,7 +73,7 @@ func Seed(ctx context.Context, dbc DBConnector, data *DataSet, opt SeedOpt) erro
 			if opt.Callback != nil {
 				opt.Callback(t, "truncate", true, nil)
 			}
-			err := dbc.Truncate(ctx, tx, t)
+			err := dbc.Truncate(ctx, exec, t)
 			if opt.Callback != nil {
 				opt.Callback(t, "truncate", false, err)
 			}
@@ -79,7 +97,7 @@ func Seed(ctx context.Context, dbc DBConnector, data *DataSet, opt SeedOpt) erro
 			if opt.Callback != nil {
 				opt.Callback(t.Name, "insert", true, nil)
 			}
-			err := processInsertOperation(ctx, dbc, tx, t, opt, false)
+			err := processInsertOperation(ctx, dbc, exec, t, opt, false)
 			if opt.Callback != nil {
 				opt.Callback(t.Name, "insert", false, nil)
 			}
@@ -90,7 +108,7 @@ func Seed(ctx context.Context, dbc DBConnector, data *DataSet, opt SeedOpt) erro
 			if opt.Callback != nil {
 				opt.Callback(t.Name, "upsert", true, nil)
 			}
-			err := processInsertOperation(ctx, dbc, tx, t, opt, true)
+			err := processInsertOperation(ctx, dbc, exec, t, opt, true)
 			if opt.Callback != nil {
 				opt.Callback(t.Name, "upsert", false, nil)
 			}
@@ -98,17 +116,16 @@ func Seed(ctx context.Context, dbc DBConnector, data *DataSet, opt SeedOpt) erro
 				return err
 			}
 		case DeleteOperation:
-			err := processDeleteOperation(ctx, dbc, tx, t, opt)
+			err := processDeleteOperation(ctx, dbc, exec, t, opt)
 			if err != nil {
 				return err
 			}
 		}
 	}
-	tx.Commit()
 	return nil
 }
 
-func processInsertOperation(ctx context.Context, dbc DBConnector, tx *sql.Tx, t *Table, opt SeedOpt, upsert bool) error {
+func processInsertOperation(ctx context.Context, dbc DBConnector, exec Executor, t *Table, opt SeedOpt, upsert bool) error {
 	var pKeys []string
 	if upsert {
 		var err error
@@ -145,17 +162,17 @@ func processInsertOperation(ctx context.Context, dbc DBConnector, tx *sql.Tx, t 
 			}
 		}
 		if upsert {
-			if err := dbc.Upsert(ctx, tx, t.Name, columns, pKeys, values); err != nil {
+			if err := dbc.Upsert(ctx, exec, t.Name, columns, pKeys, values); err != nil {
 				return err
 			}
-		} else if err := dbc.Insert(ctx, tx, t.Name, columns, values); err != nil {
+		} else if err := dbc.Insert(ctx, exec, t.Name, columns, values); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func processDeleteOperation(ctx context.Context, dbc DBConnector, tx *sql.Tx, t *Table, opt SeedOpt) error {
+func processDeleteOperation(ctx context.Context, dbc DBConnector, exec Executor, t *Table, opt SeedOpt) error {
 	columns, err := dbc.PrimaryKeys(ctx, t.Name)
 	if err != nil {
 		return err
@@ -178,7 +195,7 @@ func processDeleteOperation(ctx context.Context, dbc DBConnector, tx *sql.Tx, t 
 				}
 			}
 		}
-		if err := dbc.Delete(ctx, tx, t.Name, columns, values); err != nil {
+		if err := dbc.Delete(ctx, exec, t.Name, columns, values); err != nil {
 			return err
 		}
 	}

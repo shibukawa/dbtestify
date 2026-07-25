@@ -83,6 +83,32 @@ func AssertDBWithDB(t *testing.T, db *sql.DB, dialect dbtestify.Dialect, folder 
 	assertDB(t, t.Context(), dbc, folder, fileName, opt)
 }
 
+// SeedDataSetTx seeds inside a transaction the caller already opened.
+//
+// Nothing is committed or rolled back by this helper, so a test that rolls the
+// transaction back leaves no trace of the dataset.
+func SeedDataSetTx(t *testing.T, tx *sql.Tx, dialect dbtestify.Dialect, folder fs.FS, fileName string, opt *dbtestify.SeedOpt) {
+	t.Helper()
+	dbc, err := dbtestify.NewDBConnectorFromTx(tx, dialect)
+	if err != nil {
+		t.Fatalf("Failed to create DB connector: %v", err)
+		return
+	}
+	seed(t, t.Context(), dbc, folder, fileName, opt)
+}
+
+// AssertDBTx asserts the state seen inside a transaction the caller already
+// opened, including writes that transaction has not committed.
+func AssertDBTx(t *testing.T, tx *sql.Tx, dialect dbtestify.Dialect, folder fs.FS, fileName string, opt *dbtestify.AssertOpt) {
+	t.Helper()
+	dbc, err := dbtestify.NewDBConnectorFromTx(tx, dialect)
+	if err != nil {
+		t.Fatalf("Failed to create DB connector: %v", err)
+		return
+	}
+	assertDB(t, t.Context(), dbc, folder, fileName, opt)
+}
+
 func parseDataSet(t *testing.T, folder fs.FS, fileName string) *dbtestify.DataSet {
 	t.Helper()
 	file, err := folder.Open(fileName)
