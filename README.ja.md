@@ -119,6 +119,38 @@ test("ユーザー追加", async ({ page, request }) => {
 });
 ```
 
+#### アプリケーションへの組み込み
+
+別プロセスのサーバーからは、インメモリのSQLiteには接続できません。ファイルベースのSQLiteでも、アプリケーション自身のライターと書き込みが競合します。`httpapi.NewHandler` は、呼び出し側が持っているリソースの上に同じ3つのエンドポイントを構築し、`http.Handler` として返します。テスト対象のアプリケーション自身が、ビルドタグで保護した上でループバックに限定して公開する、という使い方を想定しています。
+
+```go
+import (
+    "net/http"
+
+    "github.com/shibukawa/dbtestify"
+    "github.com/shibukawa/dbtestify/httpapi"
+)
+
+h, err := httpapi.NewHandler(httpapi.Config{
+    // リクエストごとに1回呼ばれます。毎回同じコネクタを返しても構いません。
+    // トランザクションベースのコネクタを返せば、データ投入を呼び出し側が
+    // 管理するトランザクションの中に閉じ込められます。
+    Connector: func(ctx context.Context) (dbtestify.DBConnector, error) {
+        return dbtestify.NewDBConnectorFromDB(pool, dbtestify.PostgresDialect)
+    },
+    DataSets:   os.DirFS("testdata"),  // リクエストのパスはこのルート内で解決されます
+    AlwaysJSON: true,                  // Acceptヘッダーによらずjsonで応答します
+})
+
+mux.Handle("/_e2e/api/", http.StripPrefix("/_e2e", h))
+```
+
+パス、リクエストオプション、`SeedResponse`/`AssertResponse` のレスポンス、アサーション失敗時の400ステータスは、いずれもCLIのサーバーと同じです。`dbtestify http` 向けに書かれたテストは、ベースURLを変えるだけでそのまま動きます。JSONで応答する場合、エラーも `{"error": "..."}` の形式で返します。
+
+`httpapi` パッケージは `database/sql` のドライバーを一切登録しません。importしてもpgxやgo-sql-driver/mysql、cgoが必要なmattn/go-sqlite3がリンクされないため、`CGO_ENABLED=0` のビルドからも利用できます。
+
+> **破壊的変更:** `httpapi.Start` は `github.com/shibukawa/dbtestify/httpapi/serve` に移動しました。ドライバーのimportもこちらに移っています。シグネチャは変わりません。またサーバーは、リクエストごとではなく起動時に1回だけ接続を開くようになりました。
+
 ### Go ユニットテスト
 
 `github.com/shibukawa/dbtestify/assertdb` パッケージは、Goユニットテスト用のヘルパーを提供します。テストコード内で `assertdb.SeedDataSet` と `assertdb.AssertDB` 関数を呼び出すだけです。
@@ -265,4 +297,11 @@ $ dbtestify assert testdata/users.yaml --tags user
 
 ## ライセンス
 
-* AGPL-3.0
+以下のいずれかを、利用者が選択できるデュアルライセンスです。
+
+* GNU Affero General Public License バージョン3以降（[LICENSE-AGPL-3.0.md](LICENSE-AGPL-3.0.md)）
+* Apache License バージョン2.0（[LICENSE-APACHE-2.0.txt](LICENSE-APACHE-2.0.txt)）
+
+`SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0`
+
+HTTP APIを自分のアプリケーションから配信する場合を含め、ライブラリとしての組み込みはどちらのライセンスでも認められています。AGPLのネットワーク利用条項が適さないプロジェクトでは、Apache-2.0を選んでください。詳細は [LICENSE.md](LICENSE.md) を参照してください。
