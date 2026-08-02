@@ -120,6 +120,51 @@ test("add user", async ({ page, request }) => {
 });
 ```
 
+#### Embedding the API in your application
+
+A separate server cannot reach an in-memory SQLite database, and on a file
+backed one its writer races your application's. `httpapi.NewHandler` returns the
+same three endpoints as an `http.Handler` built on resources you already own, so
+the application under test can serve them itself — typically behind a build tag,
+bound to loopback:
+
+```go
+import (
+    "net/http"
+
+    "github.com/shibukawa/dbtestify"
+    "github.com/shibukawa/dbtestify/httpapi"
+)
+
+h, err := httpapi.NewHandler(httpapi.Config{
+    // Called once per request. Returning the same connector every time is fine;
+    // returning a transaction-backed one scopes seeding to a transaction you
+    // control.
+    Connector: func(ctx context.Context) (dbtestify.DBConnector, error) {
+        return dbtestify.NewDBConnectorFromDB(pool, dbtestify.PostgresDialect)
+    },
+    DataSets:   os.DirFS("testdata"),  // request paths are resolved inside this root
+    AlwaysJSON: true,                  // respond with JSON whatever Accept says
+})
+
+mux.Handle("/_e2e/api/", http.StripPrefix("/_e2e", h))
+```
+
+The wire contract is the one above: the same paths, the same request options,
+the same `SeedResponse` and `AssertResponse` bodies, and 400 when an assertion
+does not match — so a harness written against `dbtestify http` keeps working
+after changing its base URL. Errors come back as `{"error": "..."}` when the
+response is JSON.
+
+The `httpapi` package registers no `database/sql` driver, so importing it does
+not link pgx, go-sql-driver/mysql, or the cgo-dependent mattn/go-sqlite3. That
+is what makes it usable from a `CGO_ENABLED=0` build.
+
+> **Breaking change:** `httpapi.Start` moved to
+> `github.com/shibukawa/dbtestify/httpapi/serve`, which is where the driver
+> imports now live. The signature is unchanged. The standalone server also opens
+> exactly one connection for its whole lifetime instead of one per request.
+
 ### Go Unit Tests
 
 `github.com/shibukawa/dbtestify/assertdb` packages provides a helper for Go unit tests. Just calling `assertdb.SeedDataSet` and `assertdb.AssertDB` functions in your test code.
@@ -331,4 +376,14 @@ $ dbtestify assert testdata/users.yaml --tags user
 
 ## License
 
-* AGPL-3.0
+Dual licensed under either of the following, at your option:
+
+* GNU Affero General Public License, version 3 or later ([LICENSE-AGPL-3.0.md](LICENSE-AGPL-3.0.md))
+* Apache License, Version 2.0 ([LICENSE-APACHE-2.0.txt](LICENSE-APACHE-2.0.txt))
+
+`SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0`
+
+Embedding dbtestify as a library, including serving its HTTP API from inside
+your own application, is allowed under both. Pick Apache-2.0 if the AGPL's
+network use clause does not suit your project. See [LICENSE.md](LICENSE.md) for
+details.
