@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
+	"io/fs"
 	"time"
 
 	"github.com/shibukawa/dbtestify"
@@ -31,8 +31,8 @@ type SeedResponse struct {
 	Tables []SeedTableResult `json:"tables"`
 }
 
-func seedTable(ctx context.Context, dbc dbtestify.DBConnector, useJson bool, w io.Writer, path string, reqOpt SeedOpt) error {
-	f, err := os.Open(path)
+func seedTable(ctx context.Context, dbc dbtestify.DBConnector, useJson bool, w io.Writer, dataSets fs.FS, path string, reqOpt SeedOpt) error {
+	f, err := dataSets.Open(path)
 	if err != nil {
 		return err
 	}

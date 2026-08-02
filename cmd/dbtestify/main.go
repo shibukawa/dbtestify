@@ -13,7 +13,7 @@ import (
 
 	"github.com/shibukawa/dbtestify"
 	"github.com/shibukawa/dbtestify/connect"
-	"github.com/shibukawa/dbtestify/httpapi"
+	"github.com/shibukawa/dbtestify/httpapi/serve"
 )
 
 var deleteTaskC = color.New(color.FgHiRed).SprintFunc()
@@ -205,7 +205,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, errC("--db=<src> or DBTESTIFY_CONN envvar is required to specify database location."))
 			os.Exit(1)
 		}
-		err := httpapi.Start(ctx, cli.Http.Dir, cli.DB, cli.Http.Port)
+		err := serve.Start(ctx, cli.Http.Dir, cli.DB, cli.Http.Port)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "server start error: %s\n", err.Error())
 			os.Exit(1)

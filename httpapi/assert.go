@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/shibukawa/dbtestify"
@@ -30,8 +30,8 @@ type AssertResponse struct {
 	Tables []AssertTableResult `json:"tables"`
 }
 
-func assertTable(ctx context.Context, dbc dbtestify.DBConnector, useJson bool, w http.ResponseWriter, path string, reqOpt AssertOpt) (bool, error) {
-	f, err := os.Open(path)
+func assertTable(ctx context.Context, dbc dbtestify.DBConnector, useJson bool, w http.ResponseWriter, dataSets fs.FS, path string, reqOpt AssertOpt) (bool, error) {
+	f, err := dataSets.Open(path)
 	if err != nil {
 		return false, err
 	}
