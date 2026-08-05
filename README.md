@@ -295,7 +295,7 @@ There are several options for seeding
 * `delete`: Delete rows in the table that matches the dataset's primary keys.
 
 ```yaml
-_operations:
+_operation:
   user: clear-insert
   access_log_2025_*: truncate
   login_history: delete
@@ -346,9 +346,9 @@ Each row can have tags. You can filter the rows by tags when loading:
 
 ```yaml
 member:
-- { id: 1, name: Frank, _tags: [admin, user] }
-- { id: 2, name: Grace, _tags: [user] }
-- { id: 3, name: Ivy, _tags: [ex_user] }
+- { id: 1, name: Frank, _tag: [admin, user] }
+- { id: 2, name: Grace, _tag: [user] }
+- { id: 3, name: Ivy, _tag: [ex_user] }
 ```
 
 #### For CLI:
