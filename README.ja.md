@@ -217,7 +217,7 @@ group:
 * `delete`: データセットの主キーにマッチするテーブル内の行を削除。
 
 ```yaml
-_operations:
+_operation:
   user: clear-insert
   access_log_2025_*: truncate
   login_history: delete
@@ -268,9 +268,9 @@ audit_log:
 
 ```yaml
 member:
-- { id: 1, name: Frank, _tags: [admin, user] }
-- { id: 2, name: Grace, _tags: [user] }
-- { id: 3, name: Ivy, _tags: [ex_user] }
+- { id: 1, name: Frank, _tag: [admin, user] }
+- { id: 2, name: Grace, _tag: [user] }
+- { id: 3, name: Ivy, _tag: [ex_user] }
 ```
 
 #### CLI用：
