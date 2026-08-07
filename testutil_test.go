@@ -1,7 +1,6 @@
 package dbtestify
 
 import (
-	"context"
 	"database/sql"
 	"regexp"
 	"strings"
@@ -21,7 +20,13 @@ var testDriverNames = map[Dialect]string{
 }
 
 // openTestDBConnector is the in-package equivalent of connect.NewDBConnector.
-func openTestDBConnector(ctx context.Context, source string) (DBConnector, error) {
+//
+// The pool closes through t.Cleanup, which runs before the next subtest
+// starts. Closing it from a goroutine watching a context instead raced the
+// subtests that delete and reopen the same cache=shared SQLite file, which
+// intermittently failed with "attempt to write a readonly database".
+func openTestDBConnector(t *testing.T, source string) (DBConnector, error) {
+	t.Helper()
 	dialect, dsn, err := SplitSource(source)
 	if err != nil {
 		return nil, err
@@ -30,10 +35,7 @@ func openTestDBConnector(ctx context.Context, source string) (DBConnector, error
 	if err != nil {
 		return nil, err
 	}
-	go func() {
-		<-ctx.Done()
-		db.Close()
-	}()
+	t.Cleanup(func() { db.Close() })
 	return NewDBConnectorFromDB(db, dialect)
 }
 

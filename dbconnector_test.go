@@ -49,29 +49,26 @@ func TestDBConnectorPostgreSQL(t *testing.T) {
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	assert.NoError(t, err)
 
-	ctx2, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	db, err := openTestDBConnector(ctx2, connStr)
+	db, err := openTestDBConnector(t, connStr)
 	assert.NoError(t, err)
 
 	// with schema
-	tnames, err := db.TableNames(ctx2, "public")
+	tnames, err := db.TableNames(t.Context(), "public")
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"book_authors", "orders", "student_course_enrollments"}, tnames)
 
 	// without schema
-	tnames, err = db.TableNames(ctx2)
+	tnames, err = db.TableNames(t.Context())
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"book_authors", "orders", "student_course_enrollments"}, tnames)
 
 	// with schema
-	pkeys, err := db.PrimaryKeys(ctx2, "public.orders")
+	pkeys, err := db.PrimaryKeys(t.Context(), "public.orders")
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"order_id", "product_id"}, pkeys)
 
 	// without schema
-	pkeys, err = db.PrimaryKeys(ctx2, "orders")
+	pkeys, err = db.PrimaryKeys(t.Context(), "orders")
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"order_id", "product_id"}, pkeys)
 }
@@ -101,29 +98,26 @@ func TestDBConnectionMySQL(t *testing.T) {
 	connStr, err := mysqlContainer.ConnectionString(ctx, "tls=skip-verify")
 	assert.NoError(t, err)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	db, err := openTestDBConnector(ctx, "mysql://"+connStr)
+	db, err := openTestDBConnector(t, "mysql://"+connStr)
 	assert.NoError(t, err)
 
 	// with schema
-	tnames, err := db.TableNames(ctx, "foo")
+	tnames, err := db.TableNames(t.Context(), "foo")
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"book_authors", "orders", "student_course_enrollments"}, tnames)
 
 	// without schema
-	tnames, err = db.TableNames(ctx)
+	tnames, err = db.TableNames(t.Context())
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"book_authors", "orders", "student_course_enrollments"}, tnames)
 
 	// with schema
-	pkeys, err := db.PrimaryKeys(ctx, "foo.orders")
+	pkeys, err := db.PrimaryKeys(t.Context(), "foo.orders")
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"order_id", "product_id"}, pkeys)
 
 	// without schema
-	pkeys, err = db.PrimaryKeys(ctx, "orders")
+	pkeys, err = db.PrimaryKeys(t.Context(), "orders")
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"order_id", "product_id"}, pkeys)
 }
@@ -160,17 +154,14 @@ func TestDBConnectionSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	db, err := openTestDBConnector(ctx, "sqlite://"+connStr)
+	db, err := openTestDBConnector(t, "sqlite://"+connStr)
 	assert.NoError(t, err)
 
-	tnames, err := db.TableNames(ctx)
+	tnames, err := db.TableNames(t.Context())
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"book_authors", "orders", "student_course_enrollments"}, tnames)
 
-	pkeys, err := db.PrimaryKeys(ctx, "orders")
+	pkeys, err := db.PrimaryKeys(t.Context(), "orders")
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"order_id", "product_id"}, pkeys)
 }

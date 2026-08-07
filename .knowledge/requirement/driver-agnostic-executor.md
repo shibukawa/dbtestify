@@ -40,11 +40,6 @@ acceptance:
 verification:
   test: executor_native_test.go
   fake_backend: implements api:executor over a caller-opened *sql.Tx and returns its own cursor type, distinct from *sql.Rows, so a path still reaching for *sql.Rows would fail
-  suite: connect, httpapi, httpapi/serve, examples green on every run; root package green apart from the known flake
-  known_flake:
-    tests: TestAssertSQLite and TestSeedSQLite
-    symptom: "attempt to write a readonly database"
-    cause: openTestDBConnector closes the pool in a goroutine on ctx.Done, racing the next subtest's os.Remove and reopen of the same cache=shared filename
-    measured: identical 3/5 failure rate under go test -count=10 on this change and on its baseline, so pre-existing and not worsened
-    owner: separate test-hygiene fix, out of scope here
+  suite: full go test ./... green
+  former_flake: TestAssertSQLite and TestSeedSQLite failed intermittently while this work was in progress; the cause predated it and is now fixed under rule:test-pool-teardown
 ```

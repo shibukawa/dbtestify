@@ -122,10 +122,7 @@ func TestSeedSQLite(t *testing.T) {
 			os.Remove("seed_clear_insert.db")
 			connStr := "file:seed_clear_insert.db?cache=shared&mode=rwc"
 
-			ctx2, cancel := context.WithCancel(t.Context())
-			defer cancel()
-
-			dbc, err := openTestDBConnector(ctx2, "sqlite3://"+connStr)
+			dbc, err := openTestDBConnector(t, "sqlite3://"+connStr)
 			assert.NoError(t, err)
 
 			_, err = dbc.DB().ExecContext(t.Context(), TrimIndent(t, `
@@ -312,13 +309,10 @@ func TestSeedPostgreSQL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx2, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			dbc, err := openTestDBConnector(ctx2, connStr)
+			dbc, err := openTestDBConnector(t, connStr)
 			assert.NoError(t, err)
 
-			dbc.DB().ExecContext(ctx2, TrimIndent(t, `
+			dbc.DB().ExecContext(t.Context(), TrimIndent(t, `
 				TRUNCATE TABLE member;
 
 				INSERT INTO
@@ -492,17 +486,14 @@ func TestSeedMySQL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx2, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			dbc, err := openTestDBConnector(ctx2, "mysql://"+connStr)
+			dbc, err := openTestDBConnector(t, "mysql://"+connStr)
 			assert.NoError(t, err)
 
-			dbc.DB().ExecContext(ctx2, TrimIndent(t, `
+			dbc.DB().ExecContext(t.Context(), TrimIndent(t, `
 				TRUNCATE TABLE member;
 			`))
 
-			dbc.DB().ExecContext(ctx2, TrimIndent(t, `
+			dbc.DB().ExecContext(t.Context(), TrimIndent(t, `
 				INSERT INTO
 					member (id, name, email)
 				VALUES

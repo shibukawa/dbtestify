@@ -1,7 +1,6 @@
 package dbtestify
 
 import (
-	"context"
 	"database/sql"
 	"embed"
 	"os"
@@ -37,10 +36,7 @@ func TestAssertSQLite(t *testing.T) {
 			os.Remove("assert_test.db")
 			connStr := "file:assert_test.db?cache=shared&mode=rwc"
 
-			ctx2, cancel := context.WithCancel(t.Context())
-			defer cancel()
-
-			dbc, err := openTestDBConnector(ctx2, "sqlite3://"+connStr)
+			dbc, err := openTestDBConnector(t, "sqlite3://"+connStr)
 			assert.NoError(t, err)
 
 			_, err = dbc.DB().ExecContext(t.Context(), TrimIndent(t, `
@@ -128,13 +124,10 @@ func Test_fetchTableData(t *testing.T) {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	dbc, err := openTestDBConnector(ctx, "sqlite3://"+connStr)
+	dbc, err := openTestDBConnector(t, "sqlite3://"+connStr)
 	assert.NoError(t, err)
 
-	actual, _, err := fetchTableData(ctx, dbc, "user")
+	actual, _, err := fetchTableData(t.Context(), dbc, "user")
 	assert.NoError(t, err)
 
 	expected := [][]Value{
