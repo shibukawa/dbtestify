@@ -21,7 +21,7 @@ benchmark:
   database_sql: 34.9us/op, 15 allocs, 812 B/op
   native: 23.0us/op, 8 allocs, 451 B/op
 executor_shape_supplied:
-  Exec: over pgx Exec; the pgconn.CommandTag wrapper the original proposal needed is unnecessary because api:executor Exec returns error only
+  Exec: over pgx Exec, returning tag.RowsAffected directly; the sql.Result wrapper the original proposal needed is unnecessary because pgconn.CommandTag already exposes the count
   Query: over pgx.Rows, wrapped to satisfy api:rows-cursor
 boundary: wrapped in framework-defined interfaces; no pgx type crosses into dbtestify
 integration: pass the wrapper to NewDBConnectorFromExecutor with inTransaction true; api:from-sql is not involved

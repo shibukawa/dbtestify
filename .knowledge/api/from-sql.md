@@ -13,7 +13,7 @@ sql_handle_interface:
   QueryContext: (ctx, query, args ...any) (*sql.Rows, error)
 satisfied_by: "*sql.DB, *sql.Tx, *sql.Conn"
 adapter_behavior:
-  Exec: calls ExecContext and drops the sql.Result
+  Exec: calls ExecContext, then reads sql.Result.RowsAffected; a RowsAffected error yields the sentinel of decision:unknown-affected-sentinel rather than failing a statement that already succeeded
   Query: calls QueryContext and returns *sql.Rows as api:rows-cursor
 typed_nil_guard: Query returns an untyped nil cursor on error rather than a (*sql.Rows)(nil) inside a non-nil interface
 applied_internally_by:

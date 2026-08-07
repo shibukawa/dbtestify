@@ -12,12 +12,16 @@ var DefaultBatchSize = 50
 
 // SeedOpt defines options for the seeding process.
 type SeedOpt struct {
-	BatchSize    int                                                   // default: 50
-	Operations   map[string]Operation                                  // Operations to apply to each table. If empty, defaults to ClearInsertOperation.
-	IncludeTags  []string                                              // Tags to filter rows of dataset.
-	ExcludeTags  []string                                              // Tags to filter rows of dataset.
-	TargetTables []string                                              // Only specified tables will be processed.
-	Callback     func(targetTable, task string, start bool, err error) // Callback function to report progress and errors during the seeding process.
+	BatchSize    int                  // default: 50
+	Operations   map[string]Operation // Operations to apply to each table. If empty, defaults to ClearInsertOperation.
+	IncludeTags  []string             // Tags to filter rows of dataset.
+	ExcludeTags  []string             // Tags to filter rows of dataset.
+	TargetTables []string             // Only specified tables will be processed.
+	// Callback reports progress and errors during the seeding process. rows
+	// carries the affected-row count on the closing call, or
+	// [UnknownAffected] on the opening call and whenever the backend does not
+	// report one.
+	Callback func(targetTable, task string, start bool, rows int64, err error)
 }
 
 // Seed initializes the database with the provided dataset, applying the specified operations.
@@ -71,11 +75,11 @@ func seedInto(ctx context.Context, dbc DBConnector, exec Executor, data *DataSet
 	for t, op := range ops {
 		if op == TruncateOperation {
 			if opt.Callback != nil {
-				opt.Callback(t, "truncate", true, nil)
+				opt.Callback(t, "truncate", true, UnknownAffected, nil)
 			}
-			err := dbc.Truncate(ctx, exec, t)
+			rows, err := dbc.Truncate(ctx, exec, t)
 			if opt.Callback != nil {
-				opt.Callback(t, "truncate", false, err)
+				opt.Callback(t, "truncate", false, rows, err)
 			}
 			if err != nil {
 				return err
@@ -95,28 +99,34 @@ func seedInto(ctx context.Context, dbc DBConnector, exec Executor, data *DataSet
 			fallthrough
 		case InsertOperation:
 			if opt.Callback != nil {
-				opt.Callback(t.Name, "insert", true, nil)
+				opt.Callback(t.Name, "insert", true, UnknownAffected, nil)
 			}
-			err := processInsertOperation(ctx, dbc, exec, t, opt, false)
+			rows, err := processInsertOperation(ctx, dbc, exec, t, opt, false)
 			if opt.Callback != nil {
-				opt.Callback(t.Name, "insert", false, nil)
+				opt.Callback(t.Name, "insert", false, rows, err)
 			}
 			if err != nil {
 				return err
 			}
 		case UpsertOperation:
 			if opt.Callback != nil {
-				opt.Callback(t.Name, "upsert", true, nil)
+				opt.Callback(t.Name, "upsert", true, UnknownAffected, nil)
 			}
-			err := processInsertOperation(ctx, dbc, exec, t, opt, true)
+			rows, err := processInsertOperation(ctx, dbc, exec, t, opt, true)
 			if opt.Callback != nil {
-				opt.Callback(t.Name, "upsert", false, nil)
+				opt.Callback(t.Name, "upsert", false, rows, err)
 			}
 			if err != nil {
 				return err
 			}
 		case DeleteOperation:
-			err := processDeleteOperation(ctx, dbc, exec, t, opt)
+			if opt.Callback != nil {
+				opt.Callback(t.Name, "delete", true, UnknownAffected, nil)
+			}
+			rows, err := processDeleteOperation(ctx, dbc, exec, t, opt)
+			if opt.Callback != nil {
+				opt.Callback(t.Name, "delete", false, rows, err)
+			}
 			if err != nil {
 				return err
 			}
@@ -125,17 +135,18 @@ func seedInto(ctx context.Context, dbc DBConnector, exec Executor, data *DataSet
 	return nil
 }
 
-func processInsertOperation(ctx context.Context, dbc DBConnector, exec Executor, t *Table, opt SeedOpt, upsert bool) error {
+func processInsertOperation(ctx context.Context, dbc DBConnector, exec Executor, t *Table, opt SeedOpt, upsert bool) (int64, error) {
 	var pKeys []string
 	if upsert {
 		var err error
 		pKeys, err = dbc.PrimaryKeys(ctx, t.Name)
 		if err != nil {
-			return err
+			return UnknownAffected, err
 		}
 
 	}
 
+	var total int64
 	for i := 0; i < len(t.Rows); i += opt.BatchSize {
 		end := i + opt.BatchSize
 		if end > len(t.Rows) {
@@ -161,22 +172,27 @@ func processInsertOperation(ctx context.Context, dbc DBConnector, exec Executor,
 				}
 			}
 		}
+		var rows int64
+		var err error
 		if upsert {
-			if err := dbc.Upsert(ctx, exec, t.Name, columns, pKeys, values); err != nil {
-				return err
-			}
-		} else if err := dbc.Insert(ctx, exec, t.Name, columns, values); err != nil {
-			return err
+			rows, err = dbc.Upsert(ctx, exec, t.Name, columns, pKeys, values)
+		} else {
+			rows, err = dbc.Insert(ctx, exec, t.Name, columns, values)
 		}
+		if err != nil {
+			return UnknownAffected, err
+		}
+		total = addAffected(total, rows)
 	}
-	return nil
+	return total, nil
 }
 
-func processDeleteOperation(ctx context.Context, dbc DBConnector, exec Executor, t *Table, opt SeedOpt) error {
+func processDeleteOperation(ctx context.Context, dbc DBConnector, exec Executor, t *Table, opt SeedOpt) (int64, error) {
 	columns, err := dbc.PrimaryKeys(ctx, t.Name)
 	if err != nil {
-		return err
+		return UnknownAffected, err
 	}
+	var total int64
 	for i := 0; i < len(t.Rows); i += opt.BatchSize {
 		end := i + opt.BatchSize
 		if end > len(t.Rows) {
@@ -195,9 +211,11 @@ func processDeleteOperation(ctx context.Context, dbc DBConnector, exec Executor,
 				}
 			}
 		}
-		if err := dbc.Delete(ctx, exec, t.Name, columns, values); err != nil {
-			return err
+		rows, err := dbc.Delete(ctx, exec, t.Name, columns, values)
+		if err != nil {
+			return UnknownAffected, err
 		}
+		total = addAffected(total, rows)
 	}
-	return nil
+	return total, nil
 }

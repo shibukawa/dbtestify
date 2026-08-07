@@ -87,13 +87,23 @@ func main() {
 		}
 
 		var startTime time.Time
+		// seedOK reports a finished task, naming the affected-row count only
+		// when the backend reported one.
+		seedOK := func(rows int64) {
+			elapsed := time.Since(startTime)
+			if rows < 0 {
+				fmt.Printf(" %s (%s)\n", okC("OK"), infoC(elapsed))
+				return
+			}
+			fmt.Printf(" %s (%s)\n", okC("OK"), infoC(fmt.Sprintf("%d rows, %v", rows, elapsed)))
+		}
 		opt := dbtestify.SeedOpt{
 			BatchSize:    cli.Seed.BatchSize,
 			Operations:   data.Operation,
 			IncludeTags:  cli.Seed.IncludeTag,
 			ExcludeTags:  cli.Seed.ExcludeTag,
 			TargetTables: cli.Seed.Targets,
-			Callback: func(targetTable, task string, start bool, err error) {
+			Callback: func(targetTable, task string, start bool, rows int64, err error) {
 				if cli.Quiet {
 					return
 				}
@@ -105,7 +115,7 @@ func main() {
 					} else if err != nil {
 						fmt.Printf(" %s\n    %s\n", errC("NG"), errC(err.Error()))
 					} else {
-						fmt.Printf(" %s (%s)\n", okC("OK"), infoC(time.Since(startTime)))
+						seedOK(rows)
 					}
 				case "insert":
 					if start {
@@ -114,7 +124,7 @@ func main() {
 					} else if err != nil {
 						fmt.Printf(" %s\n    %s\n", errC("NG"), errC(err.Error()))
 					} else {
-						fmt.Printf(" %s (%s)\n", okC("OK"), infoC(time.Since(startTime)))
+						seedOK(rows)
 					}
 				case "upsert":
 					if start {
@@ -123,7 +133,7 @@ func main() {
 					} else if err != nil {
 						fmt.Printf(" %s\n    %s\n", errC("NG"), errC(err.Error()))
 					} else {
-						fmt.Printf(" %s (%s)\n", okC("OK"), infoC(time.Since(startTime)))
+						seedOK(rows)
 					}
 				case "delete":
 					if start {
@@ -132,7 +142,7 @@ func main() {
 					} else if err != nil {
 						fmt.Printf(" %s\n    %s\n", errC("NG"), errC(err.Error()))
 					} else {
-						fmt.Printf(" %s (%s)\n", okC("OK"), infoC(time.Since(startTime)))
+						seedOK(rows)
 					}
 				default:
 					panic(task)

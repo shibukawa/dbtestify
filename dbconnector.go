@@ -17,10 +17,10 @@ var ErrInvalidDBDriver = errors.New("invalid db driver")
 type DBConnector interface {
 	TableNames(ctx context.Context, schema ...string) ([]string, error)
 	PrimaryKeys(ctx context.Context, table string) ([]string, error)
-	Insert(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error
-	Delete(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error
-	Upsert(ctx context.Context, exec Executor, tableName string, columns, pKeys []string, values []any) error
-	Truncate(ctx context.Context, exec Executor, tableName string) error
+	Insert(ctx context.Context, exec Executor, tableName string, columns []string, values []any) (int64, error)
+	Delete(ctx context.Context, exec Executor, tableName string, columns []string, values []any) (int64, error)
+	Upsert(ctx context.Context, exec Executor, tableName string, columns, pKeys []string, values []any) (int64, error)
+	Truncate(ctx context.Context, exec Executor, tableName string) (int64, error)
 
 	// Executor returns the target statements run on.
 	Executor() Executor
@@ -174,7 +174,7 @@ func pgPlaceholders(columns, rows int) string {
 	return strings.Join(placeholders, ", ")
 }
 
-func (p *psqlDBConnector) Insert(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error {
+func (p *psqlDBConnector) Insert(ctx context.Context, exec Executor, tableName string, columns []string, values []any) (int64, error) {
 	insertStmt := fmt.Sprintf(
 		"INSERT INTO %s (%s) VALUES %s",
 		tableName,
@@ -184,7 +184,7 @@ func (p *psqlDBConnector) Insert(ctx context.Context, exec Executor, tableName s
 	return exec.Exec(ctx, insertStmt, values...)
 }
 
-func (p *psqlDBConnector) Delete(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error {
+func (p *psqlDBConnector) Delete(ctx context.Context, exec Executor, tableName string, columns []string, values []any) (int64, error) {
 	var columnStr string
 	var placeholderStr string
 	if len(columns) > 1 {
@@ -208,12 +208,12 @@ func (p *psqlDBConnector) Delete(ctx context.Context, exec Executor, tableName s
 }
 
 // Truncate implements DBConnector.
-func (p *psqlDBConnector) Truncate(ctx context.Context, exec Executor, tableName string) error {
+func (p *psqlDBConnector) Truncate(ctx context.Context, exec Executor, tableName string) (int64, error) {
 	return exec.Exec(ctx, fmt.Sprintf("TRUNCATE TABLE %s;", tableName))
 }
 
 // Upsert implements DBConnector.
-func (p *psqlDBConnector) Upsert(ctx context.Context, exec Executor, tableName string, columns, pKeys []string, values []any) error {
+func (p *psqlDBConnector) Upsert(ctx context.Context, exec Executor, tableName string, columns, pKeys []string, values []any) (int64, error) {
 	var assigns []string
 	for _, column := range columns {
 		if !slices.Contains(pKeys, column) {
@@ -293,7 +293,7 @@ func (m *mysqlDBConnector) PrimaryKeys(ctx context.Context, table string) ([]str
 	`, schema, tname)
 }
 
-func (m *mysqlDBConnector) Insert(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error {
+func (m *mysqlDBConnector) Insert(ctx context.Context, exec Executor, tableName string, columns []string, values []any) (int64, error) {
 	insertStmt := fmt.Sprintf(
 		"INSERT INTO %s (%s) VALUES %s;",
 		tableName,
@@ -303,7 +303,7 @@ func (m *mysqlDBConnector) Insert(ctx context.Context, exec Executor, tableName 
 	return exec.Exec(ctx, insertStmt, values...)
 }
 
-func (m *mysqlDBConnector) Delete(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error {
+func (m *mysqlDBConnector) Delete(ctx context.Context, exec Executor, tableName string, columns []string, values []any) (int64, error) {
 	var columnStr string
 	var placeholderStr string
 	if len(columns) > 1 {
@@ -323,7 +323,7 @@ func (m *mysqlDBConnector) Delete(ctx context.Context, exec Executor, tableName 
 	return exec.Exec(ctx, deleteStmt, values...)
 }
 
-func (m *mysqlDBConnector) Upsert(ctx context.Context, exec Executor, tableName string, columns, pKeys []string, values []any) error {
+func (m *mysqlDBConnector) Upsert(ctx context.Context, exec Executor, tableName string, columns, pKeys []string, values []any) (int64, error) {
 	var assigns []string
 	for _, column := range columns {
 		if !slices.Contains(pKeys, column) {
@@ -341,7 +341,7 @@ func (m *mysqlDBConnector) Upsert(ctx context.Context, exec Executor, tableName 
 	return exec.Exec(ctx, insertStmt, values...)
 }
 
-func (m *mysqlDBConnector) Truncate(ctx context.Context, exec Executor, tableName string) error {
+func (m *mysqlDBConnector) Truncate(ctx context.Context, exec Executor, tableName string) (int64, error) {
 	return exec.Exec(ctx, fmt.Sprintf("TRUNCATE TABLE %s;", tableName))
 }
 
@@ -381,7 +381,7 @@ func slPlaceholders(columns, records int) string {
 	return strings.Join(placeholders, ", ")
 }
 
-func (s *sqliteDBConnector) Insert(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error {
+func (s *sqliteDBConnector) Insert(ctx context.Context, exec Executor, tableName string, columns []string, values []any) (int64, error) {
 	insertStmt := fmt.Sprintf(
 		"INSERT INTO %s (%s) VALUES %s",
 		tableName,
@@ -391,7 +391,7 @@ func (s *sqliteDBConnector) Insert(ctx context.Context, exec Executor, tableName
 	return exec.Exec(ctx, insertStmt, values...)
 }
 
-func (s *sqliteDBConnector) Delete(ctx context.Context, exec Executor, tableName string, columns []string, values []any) error {
+func (s *sqliteDBConnector) Delete(ctx context.Context, exec Executor, tableName string, columns []string, values []any) (int64, error) {
 	var columnStr string
 	var placeholderStr string
 	if len(columns) > 1 {
@@ -410,7 +410,7 @@ func (s *sqliteDBConnector) Delete(ctx context.Context, exec Executor, tableName
 	return exec.Exec(ctx, deleteStmt, values...)
 }
 
-func (s *sqliteDBConnector) Upsert(ctx context.Context, exec Executor, tableName string, columns, pKeys []string, values []any) error {
+func (s *sqliteDBConnector) Upsert(ctx context.Context, exec Executor, tableName string, columns, pKeys []string, values []any) (int64, error) {
 	var assigns []string
 	for _, column := range columns {
 		if !slices.Contains(pKeys, column) {
@@ -429,7 +429,7 @@ func (s *sqliteDBConnector) Upsert(ctx context.Context, exec Executor, tableName
 	return exec.Exec(ctx, insertStmt, values...)
 }
 
-func (s *sqliteDBConnector) Truncate(ctx context.Context, exec Executor, tableName string) error {
+func (s *sqliteDBConnector) Truncate(ctx context.Context, exec Executor, tableName string) (int64, error) {
 	truncateSrc := fmt.Sprintf("DELETE FROM %s;", tableName)
 	return exec.Exec(ctx, truncateSrc)
 }

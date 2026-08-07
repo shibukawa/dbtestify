@@ -24,7 +24,11 @@ type SeedTableResult struct {
 	Table    string        `json:"table"`
 	Success  bool          `json:"success"`
 	Duration time.Duration `json:"duration"`
-	Error    string        `json:"error,omitzero"`
+	// Rows is the affected-row count, or -1 when the backend does not report
+	// one. It is negative rather than zero so a client can tell an unreported
+	// count apart from a statement that matched nothing.
+	Rows  int64  `json:"rows"`
+	Error string `json:"error,omitzero"`
 }
 
 type SeedResponse struct {
@@ -50,7 +54,7 @@ func seedTable(ctx context.Context, dbc dbtestify.DBConnector, useJson bool, w i
 		IncludeTags:  reqOpt.IncludeTags,
 		ExcludeTags:  reqOpt.ExcludeTags,
 		TargetTables: reqOpt.Targets,
-		Callback: func(targetTable, task string, start bool, err error) {
+		Callback: func(targetTable, task string, start bool, rows int64, err error) {
 			if start {
 				startTime = time.Now()
 			} else if err != nil {
@@ -59,6 +63,7 @@ func seedTable(ctx context.Context, dbc dbtestify.DBConnector, useJson bool, w i
 					Table:    targetTable,
 					Success:  false,
 					Duration: time.Since(startTime),
+					Rows:     rows,
 					Error:    err.Error(),
 				})
 			} else {
@@ -67,6 +72,7 @@ func seedTable(ctx context.Context, dbc dbtestify.DBConnector, useJson bool, w i
 					Table:    targetTable,
 					Success:  true,
 					Duration: time.Since(startTime),
+					Rows:     rows,
 				})
 			}
 		},
@@ -85,7 +91,11 @@ func seedTable(ctx context.Context, dbc dbtestify.DBConnector, useJson bool, w i
 		for _, t := range result.Tables {
 			fmt.Fprintf(w, "%s '%s' table -> ", t.Task, t.Table)
 			if t.Success {
-				fmt.Fprintf(w, "ok (%v)\n", t.Duration)
+				if t.Rows < 0 {
+					fmt.Fprintf(w, "ok (%v)\n", t.Duration)
+				} else {
+					fmt.Fprintf(w, "ok (%d rows, %v)\n", t.Rows, t.Duration)
+				}
 			} else {
 				fmt.Fprintf(w, "error\n    %s\n", t.Error)
 			}

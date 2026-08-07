@@ -22,9 +22,16 @@ type nativeExecutor struct {
 
 var _ Executor = (*nativeExecutor)(nil)
 
-func (e *nativeExecutor) Exec(ctx context.Context, query string, args ...any) error {
-	_, err := e.tx.ExecContext(ctx, query, args...)
-	return err
+func (e *nativeExecutor) Exec(ctx context.Context, query string, args ...any) (int64, error) {
+	result, err := e.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return UnknownAffected, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return UnknownAffected, nil
+	}
+	return affected, nil
 }
 
 func (e *nativeExecutor) Query(ctx context.Context, query string, args ...any) (Rows, error) {
@@ -122,4 +129,77 @@ func TestNativeExecutorReadsCatalog(t *testing.T) {
 	assert.Equal(t, []string{"id"}, pkeys)
 
 	assert.Equal(t, 0, exec.openCursors(), "catalog reads must close their cursors")
+}
+
+// muteExecutor reports no affected-row count, as a driver without support for
+// one would.
+type muteExecutor struct {
+	*nativeExecutor
+}
+
+func (e muteExecutor) Exec(ctx context.Context, query string, args ...any) (int64, error) {
+	if _, err := e.nativeExecutor.Exec(ctx, query, args...); err != nil {
+		return UnknownAffected, err
+	}
+	return UnknownAffected, nil
+}
+
+// seedReports drives Seed through exec and collects what the callback saw.
+func seedReports(t *testing.T, exec Executor, data *DataSet) map[string]int64 {
+	t.Helper()
+	dbc, err := NewDBConnectorFromExecutor(exec, SQLiteDialect, true)
+	assert.NoError(t, err)
+
+	reports := map[string]int64{}
+	assert.NoError(t, Seed(t.Context(), dbc, data, SeedOpt{
+		Callback: func(_, task string, start bool, rows int64, err error) {
+			assert.NoError(t, err)
+			if start {
+				// The count is not known until the task finishes.
+				assert.Equal(t, UnknownAffected, rows)
+				return
+			}
+			reports[task] = rows
+		},
+	}))
+	return reports
+}
+
+// TestNativeExecutorReportsAffectedRows proves a count from a backend outside
+// database/sql reaches SeedOpt.Callback.
+func TestNativeExecutorReportsAffectedRows(t *testing.T) {
+	db := memberDB(t, "native_affected_test")
+	tx, err := db.BeginTx(t.Context(), nil)
+	assert.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+
+	reports := seedReports(t, &nativeExecutor{tx: tx}, memberDataSet("Frank", "Grace", "Heidi"))
+
+	assert.Equal(t, int64(3), reports["insert"])
+	// The table was empty, so truncate really did affect no rows. That is a
+	// genuine zero, not an unreported count.
+	assert.Equal(t, int64(0), reports["truncate"])
+}
+
+// TestUnknownAffectedStaysNegative is why UnknownAffected is -1: a backend that
+// cannot count must not look like one that matched nothing.
+func TestUnknownAffectedStaysNegative(t *testing.T) {
+	db := memberDB(t, "native_unknown_test")
+	tx, err := db.BeginTx(t.Context(), nil)
+	assert.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+
+	reports := seedReports(t, muteExecutor{&nativeExecutor{tx: tx}}, memberDataSet("Frank", "Grace"))
+
+	assert.Equal(t, UnknownAffected, reports["insert"])
+	assert.Equal(t, UnknownAffected, reports["truncate"])
+}
+
+func TestAddAffected(t *testing.T) {
+	assert.Equal(t, int64(5), addAffected(2, 3))
+	assert.Equal(t, int64(0), addAffected(0, 0))
+	// One unknown contribution makes the whole total unknown.
+	assert.Equal(t, UnknownAffected, addAffected(2, UnknownAffected))
+	assert.Equal(t, UnknownAffected, addAffected(UnknownAffected, 2))
+	assert.Equal(t, UnknownAffected, addAffected(UnknownAffected, UnknownAffected))
 }

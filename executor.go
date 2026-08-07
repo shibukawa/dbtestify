@@ -23,12 +23,26 @@ type Rows interface {
 // bypasses the package entirely — a pgx pool, for example — implements it
 // directly. Wrap a database/sql handle with [FromSQL].
 type Executor interface {
-	// Exec runs a statement. dbtestify never reads an affected-row count, so
-	// an implementation reports only failure.
-	Exec(ctx context.Context, query string, args ...any) error
+	// Exec runs a statement and reports how many rows it affected, or
+	// [UnknownAffected] when the backend cannot tell.
+	Exec(ctx context.Context, query string, args ...any) (int64, error)
 	// Query runs a query and returns its cursor. dbtestify closes every
 	// cursor it receives.
 	Query(ctx context.Context, query string, args ...any) (Rows, error)
+}
+
+// UnknownAffected is the affected-row count of a statement whose backend does
+// not report one. It is negative so that callers can tell an unreported count
+// apart from a statement that genuinely matched no rows.
+const UnknownAffected int64 = -1
+
+// addAffected sums two affected-row counts, keeping the total unknown when
+// either side is.
+func addAffected(total, n int64) int64 {
+	if total < 0 || n < 0 {
+		return UnknownAffected
+	}
+	return total + n
 }
 
 // SQLHandle is the database/sql subset [FromSQL] adapts. *sql.DB, *sql.Tx, and
@@ -59,9 +73,18 @@ type sqlExecutor struct {
 	h SQLHandle
 }
 
-func (e sqlExecutor) Exec(ctx context.Context, query string, args ...any) error {
-	_, err := e.h.ExecContext(ctx, query, args...)
-	return err
+func (e sqlExecutor) Exec(ctx context.Context, query string, args ...any) (int64, error) {
+	result, err := e.h.ExecContext(ctx, query, args...)
+	if err != nil {
+		return UnknownAffected, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		// The driver does not support the count. Report it as unknown rather
+		// than failing a statement that already succeeded.
+		return UnknownAffected, nil
+	}
+	return affected, nil
 }
 
 func (e sqlExecutor) Query(ctx context.Context, query string, args ...any) (Rows, error) {
