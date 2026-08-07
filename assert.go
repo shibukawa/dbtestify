@@ -373,7 +373,7 @@ func fetchTableData(ctx context.Context, dbc DBConnector, tableName string) ([][
 		return nil, nil, err
 	}
 
-	rows, err := dbc.Executor().QueryContext(ctx, fmt.Sprintf("SELECT * FROM %s", tableName))
+	rows, err := dbc.Executor().Query(ctx, fmt.Sprintf("SELECT * FROM %s", tableName))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to query table %s: %w", tableName, err)
 	}

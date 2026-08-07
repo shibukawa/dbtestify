@@ -27,10 +27,14 @@ func memberDB(t *testing.T, name string) *sql.DB {
 	return db
 }
 
-func countMembers(t *testing.T, exec Executor) int {
+func countMembers(t *testing.T, h SQLHandle) int {
 	t.Helper()
+	rows, err := h.QueryContext(t.Context(), "SELECT count(*) FROM member")
+	assert.NoError(t, err)
+	defer rows.Close()
+	assert.True(t, rows.Next())
 	var count int
-	assert.NoError(t, exec.QueryRowContext(t.Context(), "SELECT count(*) FROM member").Scan(&count))
+	assert.NoError(t, rows.Scan(&count))
 	return count
 }
 
@@ -96,14 +100,18 @@ func TestAssertFromTxSeesUncommittedWrites(t *testing.T) {
 func TestNewDBConnectorFromExecutor(t *testing.T) {
 	db := memberDB(t, "executor_test")
 
-	dbc, err := NewDBConnectorFromExecutor(db, SQLiteDialect, false)
+	tx, err := db.BeginTx(t.Context(), nil)
 	assert.NoError(t, err)
-	assert.False(t, dbc.InTransaction())
-	// A *sql.DB is recognized as a pool, so Seed can still open its own
-	// transaction.
-	assert.Equal(t, db, dbc.DB())
+	t.Cleanup(func() { _ = tx.Rollback() })
+
+	dbc, err := NewDBConnectorFromExecutor(FromSQL(tx), SQLiteDialect, true)
+	assert.NoError(t, err)
+	assert.True(t, dbc.InTransaction())
+	// A bare Executor never carries a pool, so Seed runs in the caller's
+	// transaction rather than opening one.
+	assert.Equal(t, nil, dbc.DB())
 	assert.NoError(t, Seed(t.Context(), dbc, memberDataSet("Frank"), SeedOpt{}))
-	assert.Equal(t, 1, countMembers(t, db))
+	assert.Equal(t, 1, countMembers(t, tx))
 }
 
 func TestTransactionConnectorErrors(t *testing.T) {
@@ -130,7 +138,7 @@ func TestSeedRejectsPoollessConnectorOutsideTransaction(t *testing.T) {
 	assert.NoError(t, err)
 	defer conn.Close()
 
-	dbc, err := NewDBConnectorFromExecutor(conn, SQLiteDialect, false)
+	dbc, err := NewDBConnectorFromExecutor(FromSQL(conn), SQLiteDialect, false)
 	assert.NoError(t, err)
 
 	err = Seed(t.Context(), dbc, memberDataSet("Frank"), SeedOpt{})

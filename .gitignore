@@ -2,3 +2,4 @@
 testwork/*.db
 cmd/dbtestify/dbtestify
 cmd/dbtestify/dbtestify.exe
+.knowledge/.cache/

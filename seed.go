@@ -41,7 +41,7 @@ func Seed(ctx context.Context, dbc DBConnector, data *DataSet, opt SeedOpt) erro
 		return err
 	}
 	defer tx.Rollback()
-	if err := seedInto(ctx, dbc, tx, data, opt); err != nil {
+	if err := seedInto(ctx, dbc, FromSQL(tx), data, opt); err != nil {
 		return err
 	}
 	return tx.Commit()
